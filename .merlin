@@ -1,0 +1,20 @@
+FLG -rectypes
+B /home/simon/.opam/4.02.3/lib/coq/ kernel
+B /home/simon/.opam/4.02.3/lib/coq/ lib
+B /home/simon/.opam/4.02.3/lib/coq/ library
+B /home/simon/.opam/4.02.3/lib/coq/ parsing
+B /home/simon/.opam/4.02.3/lib/coq/ pretyping
+B /home/simon/.opam/4.02.3/lib/coq/ interp
+B /home/simon/.opam/4.02.3/lib/coq/ printing
+B /home/simon/.opam/4.02.3/lib/coq/ intf
+B /home/simon/.opam/4.02.3/lib/coq/ proofs
+B /home/simon/.opam/4.02.3/lib/coq/ tactics
+B /home/simon/.opam/4.02.3/lib/coq/ tools
+B /home/simon/.opam/4.02.3/lib/coq/ toplevel
+B /home/simon/.opam/4.02.3/lib/coq/ stm
+B /home/simon/.opam/4.02.3/lib/coq/ grammar
+B /home/simon/.opam/4.02.3/lib/coq/ config
+B /home/simon/workspace/nunchaku-coq/src
+S /home/simon/workspace/nunchaku-coq/src
+B _build/src
+S _build/src
