@@ -1,5 +1,4 @@
--R . Nunchaku
-src/Nunchaku.v
-src/nunchaku_coq.mllib
-src/nunchaku_coq_run.ml
-src/nunchaku_coq_main.ml4
+Nunchaku.v
+nunchaku_coq.mllib
+nunchaku_coq_run.ml
+nunchaku_coq_main.ml4

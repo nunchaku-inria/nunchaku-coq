@@ -3,6 +3,4 @@
 
 Declare ML Module "nunchaku_coq".
 
-Definition a := 0.
-
 
