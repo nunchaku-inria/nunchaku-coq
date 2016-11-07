@@ -1,0 +1,9 @@
+*#
+*.o
+*.a
+*.cm*
+*.d
+*.vo
+*.glob
+*.aux
+*.mllib
