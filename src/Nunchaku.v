@@ -1,6 +1,8 @@
 
 (* the Coq interface to Nunchaku *)
 
-Declare ML Module "nunchaku_coq_main".
+Declare ML Module "nunchaku_coq".
+
+Definition a := 0.
 
 

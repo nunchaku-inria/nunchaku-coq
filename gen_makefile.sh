@@ -2,4 +2,4 @@
 
 INCLUDES="-I src"
 
-coq_makefile $INCLUDES src/nunchaku_coq_main.ml src/Nunchaku.v > Makefile
+coq_makefile $INCLUDES -f _CoqProject > Makefile
