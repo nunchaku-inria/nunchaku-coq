@@ -49,14 +49,14 @@ vo_to_obj = $(addsuffix .o,\
 #                        #
 ##########################
 
-OCAMLLIBS?=-I "."
+OCAMLLIBS?=-I "src/"
 COQLIBS?=\
-  -R "." Nunchaku\
-  -I "."
+  -R "src/" Nunchaku\
+  -I "src/"
 COQCHKLIBS?=\
-  -R "." Nunchaku
+  -R "src/" Nunchaku
 COQDOCLIBS?=\
-  -R "." Nunchaku
+  -R "src/" Nunchaku
 
 ##########################
 #                        #
@@ -146,7 +146,7 @@ endif
 #                    #
 ######################
 
-VFILES:=Nunchaku.v
+VFILES:=src/Nunchaku.v
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(VFILES))
@@ -160,6 +160,8 @@ endif
 
 VO=vo
 VOFILES:=$(VFILES:.v=.$(VO))
+VOFILESINC=$(filter $(wildcard src//*),$(VOFILES)) 
+VOFILES1=$(patsubst src//%,%,$(filter src//%,$(VOFILES)))
 GLOBFILES:=$(VFILES:.v=.glob)
 GFILES:=$(VFILES:.v=.g)
 HTMLFILES:=$(VFILES:.v=.html)
@@ -167,7 +169,9 @@ GHTMLFILES:=$(VFILES:.v=.g.html)
 OBJFILES=$(call vo_to_obj,$(VOFILES))
 ALLNATIVEFILES=$(OBJFILES:.o=.cmi) $(OBJFILES:.o=.cmo) $(OBJFILES:.o=.cmx) $(OBJFILES:.o=.cmxs)
 NATIVEFILES=$(foreach f, $(ALLNATIVEFILES), $(wildcard $f))
-ML4FILES:=nunchaku_coq_main.ml4
+NATIVEFILESINC=$(filter $(wildcard src//*),$(NATIVEFILES)) 
+NATIVEFILES1=$(patsubst src//%,%,$(filter src//%,$(NATIVEFILES)))
+ML4FILES:=src/nunchaku_coq_main.ml4
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(ML4FILES))
@@ -179,7 +183,7 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(ML4FILES))
 
-MLFILES:=nunchaku_coq_run.ml
+MLFILES:=src/nunchaku_coq_run.ml
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(MLFILES))
@@ -191,7 +195,7 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(MLFILES))
 
-MLLIBFILES:=nunchaku_coq.mllib
+MLLIBFILES:=src/nunchaku_coq.mllib
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(MLLIBFILES))
@@ -205,12 +209,20 @@ endif
 
 ALLCMOFILES:=$(ML4FILES:.ml4=.cmo) $(MLFILES:.ml=.cmo)
 CMOFILES=$(filter-out $(addsuffix .cmo,$(foreach lib,$(MLLIBFILES:.mllib=_MLLIB_DEPENDENCIES) $(MLPACKFILES:.mlpack=_MLPACK_DEPENDENCIES),$($(lib)))),$(ALLCMOFILES))
+CMOFILESINC=$(filter $(wildcard src//*),$(CMOFILES)) 
+CMOFILES1=$(patsubst src//%,%,$(filter src//%,$(CMOFILES)))
 CMXFILES=$(CMOFILES:.cmo=.cmx)
 OFILES=$(CMXFILES:.cmx=.o)
 CMAFILES:=$(MLLIBFILES:.mllib=.cma)
+CMAFILESINC=$(filter $(wildcard src//*),$(CMAFILES)) 
+CMAFILES1=$(patsubst src//%,%,$(filter src//%,$(CMAFILES)))
 CMXAFILES:=$(CMAFILES:.cma=.cmxa)
 CMIFILES=$(ALLCMOFILES:.cmo=.cmi)
+CMIFILESINC=$(filter $(wildcard src//*),$(CMIFILES)) 
+CMIFILES1=$(patsubst src//%,%,$(filter src//%,$(CMIFILES)))
 CMXSFILES=$(CMXFILES:.cmx=.cmxs) $(CMXAFILES:.cmxa=.cmxs)
+CMXSFILESINC=$(filter $(wildcard src//*),$(CMXSFILES)) 
+CMXSFILES1=$(patsubst src//%,%,$(filter src//%,$(CMXSFILES)))
 ifeq '$(HASNATDYNLINK)' 'true'
 HASNATDYNLINK_OR_EMPTY := yes
 else
@@ -279,9 +291,12 @@ userinstall:
 	+$(MAKE) USERINSTALL=true install
 
 install-natdynlink:
-	cd "." && for i in $(CMXSFILES); do \
+	cd "src/" && for i in $(CMXSFILES1); do \
 	 install -d "`dirname "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/$$i`"; \
 	 install -m 0755 $$i "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/$$i; \
+	done
+	for i in $(CMXSFILESINC); do \
+	 install -m 0755 $$i "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/`basename $$i`; \
 	done
 
 install-toploop: $(MLLIBFILES:.mllib=.cmxs)
@@ -289,9 +304,12 @@ install-toploop: $(MLLIBFILES:.mllib=.cmxs)
 	 install -m 0755 $?  "$(DSTROOT)"$(COQTOPINSTALL)/
 
 install:$(if $(HASNATDYNLINK_OR_EMPTY),install-natdynlink)
-	cd "." && for i in $(VOFILES) $(VFILES) $(GLOBFILES) $(NATIVEFILES) $(CMOFILES) $(CMIFILES) $(CMAFILES); do \
+	cd "src/" && for i in $(CMAFILES1) $(CMIFILES1) $(CMOFILES1) $(NATIVEFILES1) $(GLOBFILES1) $(VFILES1) $(VOFILES1); do \
 	 install -d "`dirname "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/$$i`"; \
 	 install -m 0644 $$i "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/$$i; \
+	done
+	for i in $(CMAFILESINC) $(CMIFILESINC) $(CMOFILESINC) $(NATIVEFILESINC) $(GLOBFILESINC) $(VFILESINC) $(VOFILESINC); do \
+	 install -m 0644 $$i "$(DSTROOT)"$(COQLIBINSTALL)/Nunchaku/`basename $$i`; \
 	done
 
 install-doc:
@@ -302,8 +320,8 @@ install-doc:
 
 uninstall_me.sh: Makefile
 	echo '#!/bin/sh' > $@
-	printf 'cd "$${DSTROOT}"$(COQLIBINSTALL)/Nunchaku && rm -f $(CMXSFILES) && find . -type d -and -empty -delete\ncd "$${DSTROOT}"$(COQLIBINSTALL) && find "Nunchaku" -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
-	printf 'cd "$${DSTROOT}"$(COQLIBINSTALL)/Nunchaku && rm -f $(VOFILES) $(VFILES) $(GLOBFILES) $(NATIVEFILES) $(CMOFILES) $(CMIFILES) $(CMAFILES) && find . -type d -and -empty -delete\ncd "$${DSTROOT}"$(COQLIBINSTALL) && find "Nunchaku" -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
+	printf 'cd "$${DSTROOT}"$(COQLIBINSTALL)/Nunchaku && rm -f $(CMXSFILES1) && \\\nfor i in $(CMXSFILESINC); do rm -f "`basename "$$i"`"; done && find . -type d -and -empty -delete\ncd "$${DSTROOT}"$(COQLIBINSTALL) && find "Nunchaku" -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
+	printf 'cd "$${DSTROOT}"$(COQLIBINSTALL)/Nunchaku && rm -f $(CMAFILES1) $(CMIFILES1) $(CMOFILES1) $(NATIVEFILES1) $(GLOBFILES1) $(VFILES1) $(VOFILES1) && \\\nfor i in $(CMAFILESINC) $(CMIFILESINC) $(CMOFILESINC) $(NATIVEFILESINC) $(GLOBFILESINC) $(VFILESINC) $(VOFILESINC); do rm -f "`basename "$$i"`"; done && find . -type d -and -empty -delete\ncd "$${DSTROOT}"$(COQLIBINSTALL) && find "Nunchaku" -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
 	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL)/Nunchaku \\\n' >> "$@"
 	printf '&& rm -f $(shell find "html" -maxdepth 1 -and -type f -print)\n' >> "$@"
 	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL) && find Nunchaku/html -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
@@ -329,8 +347,8 @@ uninstall: uninstall_me.sh
 	@echo "B $(COQLIB) stm" >> .merlin
 	@echo "B $(COQLIB) grammar" >> .merlin
 	@echo "B $(COQLIB) config" >> .merlin
-	@echo "B /home/simon/workspace/nunchaku-coq" >> .merlin
-	@echo "S /home/simon/workspace/nunchaku-coq" >> .merlin
+	@echo "B /home/simon/workspace/nunchaku-coq/src" >> .merlin
+	@echo "S /home/simon/workspace/nunchaku-coq/src" >> .merlin
 
 clean::
 	rm -f $(ALLCMOFILES) $(CMIFILES) $(CMAFILES)
