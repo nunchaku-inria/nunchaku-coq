@@ -3,4 +3,6 @@
 src/Nunchaku.v
 src/nunchaku_coq.mllib
 src/nunchaku_coq_run.ml
+src/nunchaku_coq_utils.ml
+src/nunchaku_coq_utils.mli
 src/nunchaku_coq_main.ml4

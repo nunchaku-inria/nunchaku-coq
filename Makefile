@@ -183,7 +183,8 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(ML4FILES))
 
-MLFILES:=src/nunchaku_coq_run.ml
+MLFILES:=src/nunchaku_coq_run.ml\
+  src/nunchaku_coq_utils.ml
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(MLFILES))
@@ -207,6 +208,18 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(MLLIBFILES))
 
+MLIFILES:=src/nunchaku_coq_utils.mli
+
+ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
+-include $(addsuffix .d,$(MLIFILES))
+else
+ifeq ($(MAKECMDGOALS),)
+-include $(addsuffix .d,$(MLIFILES))
+endif
+endif
+
+.SECONDARY: $(addsuffix .d,$(MLIFILES))
+
 ALLCMOFILES:=$(ML4FILES:.ml4=.cmo) $(MLFILES:.ml=.cmo)
 CMOFILES=$(filter-out $(addsuffix .cmo,$(foreach lib,$(MLLIBFILES:.mllib=_MLLIB_DEPENDENCIES) $(MLPACKFILES:.mlpack=_MLPACK_DEPENDENCIES),$($(lib)))),$(ALLCMOFILES))
 CMOFILESINC=$(filter $(wildcard src//*),$(CMOFILES)) 
@@ -217,7 +230,7 @@ CMAFILES:=$(MLLIBFILES:.mllib=.cma)
 CMAFILESINC=$(filter $(wildcard src//*),$(CMAFILES)) 
 CMAFILES1=$(patsubst src//%,%,$(filter src//%,$(CMAFILES)))
 CMXAFILES:=$(CMAFILES:.cma=.cmxa)
-CMIFILES=$(ALLCMOFILES:.cmo=.cmi)
+CMIFILES=$(sort $(ALLCMOFILES:.cmo=.cmi) $(MLIFILES:.mli=.cmi))
 CMIFILESINC=$(filter $(wildcard src//*),$(CMIFILES)) 
 CMIFILES1=$(patsubst src//%,%,$(filter src//%,$(CMIFILES)))
 CMXSFILES=$(CMXFILES:.cmx=.cmxs) $(CMXAFILES:.cmxa=.cmxs)
@@ -236,6 +249,13 @@ endif
 #######################################
 
 all: $(VOFILES) $(CMOFILES) $(CMAFILES) $(if $(HASNATDYNLINK_OR_EMPTY),$(CMXSFILES)) 
+
+mlihtml: $(MLIFILES:.mli=.cmi)
+	 mkdir $@ || rm -rf $@/*
+	$(OCAMLDOC) -html -rectypes -d $@ -m A $(ZDEBUG) $(ZFLAGS) $(^:.cmi=.mli)
+
+all-mli.tex: $(MLIFILES:.mli=.cmi)
+	$(OCAMLDOC) -latex -rectypes -o $@ -m A $(ZDEBUG) $(ZFLAGS) $(^:.cmi=.mli)
 
 quick: $(VOFILES:.vo=.vio)
 
@@ -317,6 +337,10 @@ install-doc:
 	for i in html/*; do \
 	 install -m 0644 $$i "$(DSTROOT)"$(COQDOCINSTALL)/Nunchaku/$$i;\
 	done
+	install -d "$(DSTROOT)"$(COQDOCINSTALL)/Nunchaku/mlihtml
+	for i in mlihtml/*; do \
+	 install -m 0644 $$i "$(DSTROOT)"$(COQDOCINSTALL)/Nunchaku/$$i;\
+	done
 
 uninstall_me.sh: Makefile
 	echo '#!/bin/sh' > $@
@@ -325,6 +349,9 @@ uninstall_me.sh: Makefile
 	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL)/Nunchaku \\\n' >> "$@"
 	printf '&& rm -f $(shell find "html" -maxdepth 1 -and -type f -print)\n' >> "$@"
 	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL) && find Nunchaku/html -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
+	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL)/Nunchaku \\\n' >> "$@"
+	printf '&& rm -f $(shell find "mlihtml" -maxdepth 1 -and -type f -print)\n' >> "$@"
+	printf 'cd "$${DSTROOT}"$(COQDOCINSTALL) && find Nunchaku/mlihtml -maxdepth 0 -and -empty -exec rmdir -p \{\} \;\n' >> "$@"
 	chmod +x $@
 
 uninstall: uninstall_me.sh
@@ -385,6 +412,12 @@ Makefile: _CoqProject
 # Implicit rules. #
 #                 #
 ###################
+
+$(MLIFILES:.mli=.cmi): %.cmi: %.mli
+	$(CAMLC) $(ZDEBUG) $(ZFLAGS) $<
+
+$(addsuffix .d,$(MLIFILES)): %.mli.d: %.mli
+	$(OCAMLDEP) -slash $(OCAMLLIBS) "$<" > "$@" || ( RV=$$?; rm -f "$@"; exit $${RV} )
 
 $(ML4FILES:.ml4=.cmo): %.cmo: %.ml4
 	$(CAMLC) $(ZDEBUG) $(ZFLAGS) $(PP) -impl $<
