@@ -25,6 +25,9 @@ module Fmt : sig
   val arrayi : ?start:string -> ?stop:string -> ?sep:string ->
     (int * 'a) printer -> 'a array printer
 
+  val range : ?sep:string -> int printer -> int printer
+  (** [range pp n] prints the list [pp 0, pp 1, ... , pp (n-1)] *)
+
   val option : 'a printer -> 'a option printer
 
   val pair : ?sep:string -> 'a printer -> 'b printer -> ('a * 'b) printer
@@ -40,4 +43,11 @@ module Fmt : sig
   val hvbox : ?i:int -> 'a printer -> 'a printer
   val hovbox : ?i:int -> 'a printer -> 'a printer
   val hbox : 'a printer -> 'a printer
+  val sprintf : ('a, t, unit, string) format4 -> 'a
+  val ksprintf :
+    f:(string -> 'b) ->
+    ('a, Format.formatter, unit, 'b) format4 ->
+    'a
 end
+
+val pp_term : Term.constr Fmt.printer

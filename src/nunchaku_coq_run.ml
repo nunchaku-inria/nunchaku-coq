@@ -98,8 +98,90 @@ module Ast = struct
     | Stmt_goal g -> Format.fprintf out "(@[goal %a@])" pp_term g
 end
 
-let get_problem (g:_ PV.Goal.t) : Ast.problem =
-  assert false
+(** {2 Debug Output}
+
+    We optionally write to a file.
+    TODO: use environment variable instead? Or pure Coq options? *)
+
+let log_active = true (* if true, {!Log.output} will write to some file *)
+
+module Log : sig
+  val output : string -> unit
+  val outputf : ('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a
+end = struct
+  let output =
+    if log_active then (
+      let oc = open_out "/tmp/nunchaku_coq.log" in
+      fun s ->
+        output_string oc s; output_char oc '\n'; flush oc
+    ) else (fun _ -> ())
+
+  let outputf msg = U.Fmt.ksprintf msg ~f:output
+end
+
+(** {2 Problem Extraction}
+
+    This converts the given Coq goal into some problem that roughly looks
+    like what Nunchaku will accept. *)
+
+module Extract : sig
+  val problem_of_goal : [`NF] PV.Goal.t -> Ast.problem
+end = struct
+  let string_of_globname (n:Globnames.global_reference): string =
+    let module G = Globnames in
+    begin match n with
+      | G.ConstRef c -> Names.string_of_con c
+      | G.VarRef v -> "(var " ^ Names.Id.to_string v ^ ")"
+      | G.IndRef (inds,i) ->
+        Printf.sprintf "(ind_%d in %s)" i (Names.string_of_mind inds)
+      | G.ConstructRef ((inds,i),n) ->
+        Printf.sprintf "(cstor_%d in (ind_%d in %s))" n i (Names.string_of_mind inds)
+    end
+
+  let l_of_refset_env set =
+    Globnames.Refset_env.fold (fun x l-> string_of_globname x::l) set []
+
+  let l_of_map1 m =
+    Globnames.Refmap_env.fold
+      (fun x l acc-> (string_of_globname x,l_of_refset_env l)::acc) m []
+
+  type map2 = 
+    (Names.Label.t *
+       (Names.Name.t * Constr.t option * Constr.t) list *
+       Constr.t)
+      list Globnames.Refmap_env.t
+
+  let l_of_map2 (m:map2) =
+    Globnames.Refmap_env.fold
+      (fun x l acc-> (string_of_globname x,l)::acc) m []
+
+  (* print raw data from [Assumptions.traverse] *)
+  let pp_raw_traverse out (set,map,map2) =
+    let pp_map_entry out (s,l) =
+      Format.fprintf out "(@[<2>%s: [@[%a@]]@])" s U.Fmt.(list string) l
+    and pp_map2_entry out (s,l) =
+      let pp_trip out (x,_,ret) = (* TODO: show middle thing *)
+        Format.fprintf out "(@[%s %a@])"
+          (Names.string_of_label x)
+          U.pp_term ret
+      in
+      Format.fprintf out "(@[<2>%s: [@[%a@]]@])" s U.Fmt.(list pp_trip) l
+    in
+    Format.fprintf out
+      "(@[<v>constants: [@[%a@]],@ deps: [@[%a@]]@,@ map2: [@[%a@]]@])"
+      U.Fmt.(list string) (l_of_refset_env set)
+      U.Fmt.(list pp_map_entry) (l_of_map1 map)
+      U.Fmt.(list pp_map2_entry) (l_of_map2 map2)
+
+  let problem_of_goal (g:[`NF] PV.Goal.t) : Ast.problem =
+    let g_term = PV.Goal.concl g in
+    (* call this handy function to get all dependencies *)
+    let set, map, map2 =
+      Assumptions.traverse (Names.Label.make "<current>") g_term
+    in
+    Log.outputf "@[<2>get_problem:@ @[%a@]@]" pp_raw_traverse (set,map,map2);
+    assert false
+end
 
 exception Nunchaku_counter_ex
 
@@ -127,8 +209,9 @@ end = struct
     | Counter_ex of string
     | Unknown of string
 
+  (* TODO *)
   let call pb =
-    assert false (* TODO *)
+    Unknown "should call nunchaku"
 
   let return_res = function
     | Ok -> PV.tclUNIT ()
@@ -146,13 +229,13 @@ end = struct
   let tactic pb =
     let t1 = N.timeout !timeout (N.make (fun () -> call pb)) in
     PV.tclBIND (PV.tclLIFT t1) return_res
-      
 end
 
 let call (): unit PV.tactic =
   PV.Goal.nf_enter
     (fun g ->
-       let pb = get_problem g in
+       (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
+       let pb = Extract.problem_of_goal g in
        Solve.tactic pb)
 
 
