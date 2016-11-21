@@ -1,3 +1,5 @@
+-R . Nunchaku
+-I .
 Nunchaku.v
 nunchaku_coq.mllib
 nunchaku_coq_run.ml

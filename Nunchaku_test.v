@@ -1,6 +1,7 @@
 (* tests for the tactic Nunchaku *)
 
-Load Nunchaku.
+Require Import Nunchaku.
+Require Import Nunchaku.Nunchaku.
 
 Variable A B : Prop.
 
