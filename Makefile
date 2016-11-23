@@ -184,8 +184,10 @@ endif
 .SECONDARY: $(addsuffix .d,$(ML4FILES))
 
 MLFILES:=src/nunchaku_coq_ast.ml\
-  src/nunchaku_coq_run.ml\
-  src/nunchaku_coq_utils.ml
+  src/nunchaku_coq_utils.ml\
+  src/nunchaku_coq_sexp.ml\
+  src/nunchaku_coq_sexp_lex.ml\
+  src/nunchaku_coq_run.ml
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(MLFILES))
@@ -209,7 +211,8 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(MLLIBFILES))
 
-MLIFILES:=src/nunchaku_coq_utils.mli
+MLIFILES:=src/nunchaku_coq_utils.mli\
+  src/nunchaku_coq_sexp.mli
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
 -include $(addsuffix .d,$(MLIFILES))
@@ -295,6 +298,15 @@ beautify: $(VFILES:=.beautified)
 	@echo 'If there were a problem, execute "for file in $$(find . -name \*.v.old -print); do mv $${file} $${file%.old}; done" in your shell/'
 
 .PHONY: all archclean beautify byte clean cleanall gallina gallinahtml html install install-doc install-natdynlink install-toploop opt printenv quick uninstall userinstall validate vio2vo
+
+###################
+#                 #
+# Custom targets. #
+#                 #
+###################
+
+%.ml: %.mll
+	ocamllex $<
 
 ####################
 #                  #
