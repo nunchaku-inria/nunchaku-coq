@@ -210,8 +210,21 @@ let finally ~h f =
     h();
     raise e
 
-module Process = struct
-  type status = int
+module IO = struct
+  (* quite naive, but portable (i.e. old OCaml versions) without depending
+     on Bytes *)
+  let read_all ic =
+    let buf = ref [] in
+    try
+      while true do
+        let l = input_line ic in
+        buf := l :: !buf
+      done;
+      assert false
+    with End_of_file ->
+      String.concat "\n" (List.rev !buf)
+
+  type process_status = int
 
   (* create a new active process by running [cmd] and applying [f] on it *)
   let popen cmd ~f =

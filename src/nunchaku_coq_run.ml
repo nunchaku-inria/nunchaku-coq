@@ -147,7 +147,7 @@ module Solve : sig
     | Counter_ex of string
     | Unknown of string
 
-  val call : Ast.problem -> res
+  val call : Ast.problem -> res N.t
   (** Call nunchaku on the given problem *)
 
   val return_res : res -> unit PV.tactic
@@ -163,9 +163,38 @@ end = struct
     | Counter_ex of string
     | Unknown of string
 
-  (* TODO *)
-  let call pb =
-    Unknown "should call nunchaku"
+  let print_problem out (pb:Ast.problem): unit =
+    Format.fprintf out "@[<v>%a@]@." Ast.pp_statement_list pb
+
+  module Sexp = Nunchaku_coq_sexp
+
+  let parse_res ~stdout (sexp:Sexp.t): res = match sexp with
+    | `Atom "UNSAT" -> Ok
+    | `Atom "TIMEOUT" -> Unknown ("timeout\n" ^ stdout)
+    | `Atom "UNKNOWN" -> Unknown ("unknown\n" ^ stdout)
+    | `List [`Atom "SAT"; _model] ->
+      (* TODO: parse model *)
+      Counter_ex ("counter-example found:\n" ^ stdout)
+    | _ ->
+      failwith ("could not parse Nunchaku's output\noutput:\n" ^ stdout)
+
+  let timeout = 10
+
+  let call_ pb : res =
+    let cmd = Printf.sprintf "nunchaku -o sexp -i nunchaku -nc -t %d" timeout in
+    U.IO.popen cmd
+      ~f:(fun (oc,ic) ->
+        let fmt = Format.formatter_of_out_channel oc in
+        print_problem fmt pb;
+        Format.pp_print_flush fmt ();
+        close_out oc;
+        (* now read Nunchaku's output *)
+        let out = U.IO.read_all ic in
+        let sexp = Nunchaku_coq_sexp.parse_string out in
+        parse_res ~stdout:out sexp
+      ) |> fst
+
+  let call pb = N.make (fun () -> call_ pb)
 
   let return_res = function
     | Ok -> PV.tclUNIT ()
@@ -180,9 +209,19 @@ end = struct
 
   let timeout : int ref = ref 10
 
+  (*
+    (fun (e,_) ->
+       let err_msg =
+         Pp.(str "error when running nunchaku: " ++ str (Printexc.to_string e))
+       in
+       N.print_error err_msg)
+   *)
+
   let tactic pb =
-    let t1 = N.timeout !timeout (N.make (fun () -> call pb)) in
-    PV.tclBIND (PV.tclLIFT t1) return_res
+    let t1 = N.timeout !timeout (call pb) in
+    PV.tclBIND
+      (PV.tclLIFT t1)
+      return_res
 end
 
 let call (): unit PV.tactic =

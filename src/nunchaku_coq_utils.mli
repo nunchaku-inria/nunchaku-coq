@@ -61,10 +61,14 @@ val finally : h:(unit -> unit) -> (unit -> 'a) -> 'a
 (** [finally ~h f] behaves like [f()], but calls [h()] before returning
     whatever happens *)
 
-module Process : sig
-  type status = int
+module IO : sig
+  val read_all : in_channel -> string
+  (** Read the whole channel's content.
+      Might forget the last trailing '\n'. *)
 
-  val popen : string -> f:(out_channel * in_channel -> 'a) -> 'a * status
+  type process_status = int
+
+  val popen : string -> f:(out_channel * in_channel -> 'a) -> 'a * process_status
   (** [popen cmd ~f] starts a subprocess executing [cmd], and calls
       [f] with the [(stdin,stdout)] of the sub-process. *)
 end
