@@ -13,128 +13,8 @@ type coq_term = Term.constr
 
 let fpf = Format.fprintf
 
-module Nun_id : sig
-  type t
-  val of_string : string -> t 
-  val of_coq_id : Names.Id.t -> t
-  val pp : t U.Fmt.printer
-  module Set : Set.S with type elt = t
-  module Map : Map.S with type key = t
-end = struct
-  type t = string
-  let of_string s = s
-  let of_coq_id = Names.string_of_id
-  let pp = U.Fmt.string
-  module Set = Set.Make(String)
-  module Map = Map.Make(String)
-end
-
 (** {2 Intermediate AST} *)
-module Ast = struct
-  type id = Nun_id.t
-
-  type term =
-    | Var of var
-    | Const of id
-    | App of term * term list
-    | Fun of typed_var * term
-    | Pi of typed_var * term
-    | Builtin of builtin
-
-  and ty = term
-  and var = id
-  and typed_var = id * ty
-
-  and builtin =
-    | B_true
-    | B_false
-    | B_and
-    | B_or
-    | B_not
-    | B_imply
-    | B_prop
-    | B_type
-
-  type statement = {
-    st_id: int;
-    st_view: statement_view;
-  }
-  and statement_view =
-    | Stmt_declare of id * ty
-    | Stmt_define of id * ty * term
-    | Stmt_goal of term
-
-  module St_set = Set.Make(struct
-      type t = statement
-      let compare a b = Pervasives.compare a.st_id b.st_id
-    end)
-
-  type problem = statement list
-
-  let var v = Var v
-  let const c = Const c
-  let app f l = match f, l with
-    | _, [] -> f
-    | App (f1,l1), _ -> App(f1, l1@l)
-    | _ -> App (f,l)
-  let fun_ v t = Fun (v,t)
-  let pi v t = Pi (v,t)
-  let builtin b = Builtin b
-  let app_builtin b l = app (builtin b) l
-
-  let true_ = builtin B_true
-  let false_ = builtin B_false
-  let imply a b = app_builtin B_imply [a;b]
-  let and_ l = app_builtin B_and l
-  let or_ l = app_builtin B_or l
-  let not_ a = app_builtin B_not [a]
-  let prop = builtin B_prop
-  let type_ = builtin B_type
-
-  let ty_var_of_id id = Nun_id.of_coq_id id, type_
-  let const_of_id id = const (Nun_id.of_coq_id id)
-
-  let mk_st_ =
-    let n = ref 0 in
-    fun st_view -> incr n; {st_view; st_id= !n }
-
-  let st_declare id ty = mk_st_ (Stmt_declare (id,ty))
-  let st_define id ty rhs = mk_st_ (Stmt_define (id,ty,rhs))
-  let st_goal g = mk_st_ (Stmt_goal g)
-
-  let pp_id = Nun_id.pp
-  let pp_var = pp_id
-
-  let rec pp_term out = function
-    | Var v -> pp_var out v
-    | Const id -> pp_id out id
-    | App (f, l) ->
-      Format.fprintf out "(@[<hv2>%a@ %a@])"
-        pp_term f (U.Fmt.list ~sep:" " pp_term) l
-    | Fun (v,t) ->
-      Format.fprintf out "(@[<2>fun %a@ %a@])" pp_typed_var v pp_term t
-    | Pi (v,t) ->
-      Format.fprintf out "(@[<2>pi %a@ %a@])" pp_typed_var v pp_term t
-    | Builtin b -> pp_builtin out b
-  and pp_ty out ty = pp_term out ty
-  and pp_typed_var out (v,ty) = Format.fprintf out "(@[%a@ %a@])" pp_var v pp_ty ty
-  and pp_builtin out = function
-    | B_true -> U.Fmt.string out "true"
-    | B_false -> U.Fmt.string out "false"
-    | B_prop -> U.Fmt.string out "prop"
-    | B_type -> U.Fmt.string out "type"
-    | B_and -> U.Fmt.string out "and"
-    | B_or -> U.Fmt.string out "or"
-    | B_not -> U.Fmt.string out "not"
-    | B_imply -> U.Fmt.string out "=>"
-
-  let pp_statement out st = match st.st_view with
-    | Stmt_declare (id,ty) ->
-      Format.fprintf out "(@[<2>decl %a@ : %a@])" pp_id id pp_ty ty
-    | Stmt_define (id,ty,rhs) ->
-      Format.fprintf out "(@[<2>def %a@ : %a@ := %a@])" pp_id id pp_ty ty pp_term rhs
-    | Stmt_goal g -> Format.fprintf out "(@[goal %a@])" pp_term g
-end
+module Ast = Nunchaku_coq_ast
 
 (** {2 Debug Output}
 
@@ -187,7 +67,7 @@ end = struct
     Globnames.Refmap_env.fold
       (fun x l acc-> (string_of_globname x,l_of_refset_env l)::acc) m []
 
-  type map2 = 
+  type map2 =
     (Names.Label.t *
        (Names.Name.t * Constr.t option * Constr.t) list *
        Constr.t)

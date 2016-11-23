@@ -183,7 +183,8 @@ endif
 
 .SECONDARY: $(addsuffix .d,$(ML4FILES))
 
-MLFILES:=src/nunchaku_coq_run.ml\
+MLFILES:=src/nunchaku_coq_ast.ml\
+  src/nunchaku_coq_run.ml\
   src/nunchaku_coq_utils.ml
 
 ifneq ($(filter-out archclean clean cleanall printenv,$(MAKECMDGOALS)),)
