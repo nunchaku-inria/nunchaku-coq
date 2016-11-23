@@ -51,3 +51,8 @@ module Fmt : sig
 end
 
 val pp_term : Term.constr Fmt.printer
+
+module Array : sig
+  type 'a t = 'a array
+  val for_all : f:('a -> bool) -> 'a t -> bool
+end

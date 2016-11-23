@@ -191,4 +191,12 @@ let pp_term out csr =
   in
   term_display out csr
 
+module Array = struct
+  type 'a t = 'a array
 
+  let for_all ~f a =
+    let rec aux i =
+      i = Array.length a || (f a.(i) && aux (i+1))
+    in
+    aux 0
+end
