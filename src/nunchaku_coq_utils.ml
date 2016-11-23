@@ -200,3 +200,51 @@ module Array = struct
     in
     aux 0
 end
+
+let finally ~h f =
+  try
+    let x = f() in
+    h();
+    x
+  with e ->
+    h();
+    raise e
+
+module Process = struct
+  type status = int
+
+  (* create a new active process by running [cmd] and applying [f] on it *)
+  let popen cmd ~f =
+    ignore (Unix.sigprocmask Unix.SIG_BLOCK [13]); (* block sigpipe *)
+    (* spawn subprocess *)
+    let stdout, p_stdout = Unix.pipe () in
+    let stderr, p_stderr = Unix.pipe () in
+    let p_stdin, stdin = Unix.pipe () in
+    Unix.set_close_on_exec stdout;
+    Unix.set_close_on_exec stderr;
+    Unix.set_close_on_exec stdin;
+    let stdout = Unix.in_channel_of_descr stdout in
+    let stdin = Unix.out_channel_of_descr stdin in
+    let pid = Unix.create_process
+        "/bin/sh" [| "/bin/sh"; "-c"; cmd |] p_stdin p_stdout p_stderr in
+    Unix.close p_stdout;
+    Unix.close p_stdin;
+    Unix.close p_stderr;
+    (* cleanup process *)
+    let cleanup () =
+      (try Unix.kill pid 15 with _ -> ());
+      close_out_noerr stdin;
+      close_in_noerr stdout;
+      (try Unix.close stderr with _ -> ());
+      (try Unix.kill pid 9 with _ -> ()); (* just to be sure *)
+    in
+    finally ~h:cleanup
+      (fun () ->
+         let x = f (stdin, stdout) in
+         let _, res = Unix.waitpid [Unix.WUNTRACED] pid in
+         let res = match res with
+           | Unix.WEXITED i | Unix.WSTOPPED i | Unix.WSIGNALED i -> i
+         in
+         x, res
+      )
+end

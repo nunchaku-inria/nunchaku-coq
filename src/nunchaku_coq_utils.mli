@@ -56,3 +56,15 @@ module Array : sig
   type 'a t = 'a array
   val for_all : f:('a -> bool) -> 'a t -> bool
 end
+
+val finally : h:(unit -> unit) -> (unit -> 'a) -> 'a
+(** [finally ~h f] behaves like [f()], but calls [h()] before returning
+    whatever happens *)
+
+module Process : sig
+  type status = int
+
+  val popen : string -> f:(out_channel * in_channel -> 'a) -> 'a * status
+  (** [popen cmd ~f] starts a subprocess executing [cmd], and calls
+      [f] with the [(stdin,stdout)] of the sub-process. *)
+end
