@@ -9,16 +9,27 @@ module Nun_id : sig
   type t
   val of_string : string -> t 
   val of_coq_id : Names.Id.t -> t
+  val of_coq_name : Names.Name.t -> t
   val pp : t U.Fmt.printer
   module Set : Set.S with type elt = t
   module Map : Map.S with type key = t
+  val fresh : t -> Set.t -> t
 end = struct
   type t = string
   let of_string s = s
   let of_coq_id = Names.string_of_id
+  let of_coq_name = function
+    | Names.Name.Anonymous -> of_string "_x"
+    | Names.Name.Name id -> of_coq_id id
   let pp = U.Fmt.string
   module Set = Set.Make(String)
   module Map = Map.Make(String)
+
+  let rec fresh id avoid =
+    if Set.mem id avoid then
+      fresh (id^"'") avoid
+    else
+      id
 end
 
 module Builtin : sig
