@@ -42,6 +42,17 @@ end
     This converts the given Coq goal into some problem that roughly looks
     like what Nunchaku will accept. *)
 
+module Coq = struct
+
+  let true_  = Coqlib.build_coq_True ()
+  let false_ = Coqlib.build_coq_False ()
+  let and_   = Coqlib.build_coq_and ()
+  let iff_   = Coqlib.build_coq_iff ()
+  let or_    = Coqlib.build_coq_or ()
+  let eq_    = Coqlib.build_coq_eq ()
+
+end
+
 module Extract : sig
   val problem_of_goal : [`NF] PV.Goal.t -> Ast.problem
 end = struct
@@ -117,15 +128,83 @@ end = struct
   let fetch_def_of_label env (l:Names.Label.t): Ast.statement =
     assert false (* TODO *)
 
-  let problem_of_goal (g:[`NF] PV.Goal.t) : Ast.problem =
-    let g_term = PV.Goal.concl g in
-    let env = PV.Goal.env g in
-    let hyps = PV.Goal.hyps g in
-    (* call this handy function to get all dependencies *)
-    let set, map, map2 =
-      Assumptions.traverse (Names.Label.make "Top") g_term
+  let term_of_coq (t:coq_term) : Ast.term =
+    (* adds a fresh (in subst) identifier based on [x] as the 0-th
+       element of subst. *)
+    (* TODO: subst should probably be a map. *)
+    let push_fresh (x:Names.Name.t) (subst:Ast.id list) : Ast.id list =
+      let x = Ast.Nun_id.of_coq_name x in
+      let fresh = Ast.Nun_id.fresh x (Ast.Nun_id.Set.of_list subst) in
+      fresh::subst
     in
-    Log.outputf "@[<2>get_problem:@ @[%a@]@]" pp_raw_traverse (set,map,map2);
+    let rec simple_type_of_coq (subst:Ast.id list) (t:coq_term) : Ast.ty =
+      let open Ast in
+      match Constr.kind t with
+      | Constr.Prod (_,a,b) when not (Termops.dependent (Constr.mkRel 1) b) ->
+        ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq subst b)
+      | Constr.Const (cn,_) ->
+        Names.(cn |> Constant.user |> KerName.to_string |> Nun_id.of_string |> var)
+      | _ -> assert false
+    in
+    let rec term_of_coq (subst:Ast.id list) (t:coq_term) : Ast.term =
+      let open Ast in
+      match Constr.kind t with
+      (* Propositional connectives. *)
+      | _ when Constr.equal t Coq.true_ -> true_
+      | _ when Constr.equal t Coq.false_ -> false_
+      | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.and_ ->
+        and_ [term_of_coq subst p ; term_of_coq subst q]
+      | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.or_ ->
+        or_ [term_of_coq subst p ; term_of_coq subst q]
+      | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.iff_ ->
+        equiv (term_of_coq subst p) (term_of_coq subst q)
+      | Constr.App (h, [| _ ; p ; q |]) when Globnames.is_global Coq.eq_ h ->
+        eq (term_of_coq subst p) (term_of_coq subst q)
+      (* arnaud: todo: je crois qu'il y a une fonction de bibliothèque pour tester si le de Bruijn 1 est dans un terme. Fix here and above. *)
+      | Constr.Prod (_,p,q) when not (Termops.dependent (Constr.mkRel 1) q) ->
+        imply (term_of_coq subst p) (term_of_coq subst q)
+      | Constr.Prod _ -> failwith "TODO: term_of_coq: Prod"
+      (* TODO: not *)
+      (* /Propositional connectives *)
+      (* simply-typed λ-calculus *)
+      | Constr.Lambda (x,t,u) ->
+        let (x::_) as subst = push_fresh x subst in
+        fun_ (x, simple_type_of_coq subst t) (term_of_coq subst u)
+      | Constr.App (x, args) ->
+        app (term_of_coq subst x) Array.(map (term_of_coq subst) args |> to_list)
+      | Constr.Rel n -> var @@ List.nth subst (n-1)
+      (* Misc *)
+      | Constr.LetIn _ -> failwith "TODO: term_of_coq: LetIn"
+      | Constr.Cast _ -> failwith "TODO: term_of_coq: Cast"
+      (* Hypotheses *)
+      | Constr.Var _ -> failwith "TODO: term_of_coq: Var"
+      (* Toplevel definitions *)
+      | Constr.Const (cn,_) ->
+        Names.(cn |> Constant.user |> KerName.to_string |> Nun_id.of_string |> var)
+      | Constr.Ind _ -> failwith "TODO: term_of_coq: Ind"
+      | Constr.Construct _ -> failwith "TODO: term_of_coq: Construct"
+      (* Pattern Matching & fixed points *)
+      | Constr.Case _ -> failwith "TODO: term_of_coq: Case"
+      | Constr.Fix _ -> failwith "TODO: term_of_coq: Fix"
+      | Constr.CoFix _ -> failwith "TODO: term_of_coq: CoFix"
+      | Constr.Proj _ -> failwith "TODO: term_of_coq: Proj"
+      (* Not supported *)
+      | Constr.Meta _ -> failwith "Metas not supported"
+      | Constr.Evar _ -> failwith "Evars not supported"
+      (* Types *)
+      | Constr.Sort _ -> failwith "TODO: term_of_coq: Sort"
+    in
+    term_of_coq [] t
+
+  let problem_of_goal (g:[`NF] PV.Goal.t) : Ast.problem =
+    let concl = PV.Goal.concl g in
+    let env = PV.Goal.env g in
+    let hyps = List.map Util.pi3 (PV.Goal.hyps g) in
+    (* call this handy function to get all dependencies *)
+    (* let set, map, map2 = *)
+    (*   Assumptions.traverse (Names.Label.make "Top") g_term *)
+    (* in *)
+    (* Log.outputf "@[<2>get_problem:@ @[%a@]@]" pp_raw_traverse (set,map,map2); *)
     (* FIXME?
     let ctxmap =
       Assumptions.assumptions ~add_opaque:true ~add_transparent:true
@@ -134,7 +213,14 @@ end = struct
     in
     Log.outputf "@[<2>ctxmap: %a@]" pp_ctxmap ctxmap;
     *)
-    assert false
+    let concl = term_of_coq concl in
+    let hyps = List.map term_of_coq hyps in
+    let goal =
+      match hyps with
+      | [] -> Ast.not_ concl
+      | hyps -> Ast.(not_ @@ imply (and_ hyps) concl)
+    in
+    [Ast.goal goal]
 end
 
 exception Nunchaku_counter_ex
@@ -229,6 +315,7 @@ let call (): unit PV.tactic =
     (fun g ->
        (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
        let pb = Extract.problem_of_goal g in
-       Solve.tactic pb)
-
-
+       let () = Format.fprintf Format.str_formatter "@[<2>problem:@ @[%a@]@]" Ast.pp_statement_list pb in
+       let pp_pb = Format.flush_str_formatter () in
+       Proofview.V82.tactic @@ Tacticals.tclIDTAC_MESSAGE Pp.(str pp_pb)
+       (* Solve.tactic pb *))

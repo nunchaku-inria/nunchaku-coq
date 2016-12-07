@@ -2,6 +2,26 @@
 
 Require Import Nunchaku.Nunchaku.
 
+Module pure_logic.
+
+  Goal (False -> False) -> False.
+  Proof.
+    nunchaku.
+  Abort.
+
+End pure_logic.
+
+Module simple_types.
+
+  Definition A := unit.
+
+  Goal (fun x:A => x) = (fun x:A => x).
+  Proof.
+    nunchaku.
+  Qed.
+
+End simple_types.
+
 Section sec1.
 
 Inductive mynat := Z | S : mynat -> mynat.
