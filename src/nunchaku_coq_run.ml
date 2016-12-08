@@ -223,7 +223,7 @@ end = struct
     [Ast.goal goal]
 end
 
-exception Nunchaku_counter_ex
+exception Nunchaku_counter_ex of string
 
 module N = PV.NonLogical
 
@@ -260,7 +260,7 @@ end = struct
     | `Atom "UNKNOWN" -> Unknown ("unknown\n" ^ stdout)
     | `List [`Atom "SAT"; _model] ->
       (* TODO: parse model *)
-      Counter_ex ("counter-example found:\n" ^ stdout)
+      Counter_ex stdout
     | _ ->
       failwith ("could not parse Nunchaku's output\noutput:\n" ^ stdout)
 
@@ -288,10 +288,10 @@ end = struct
       PV.tclTHEN
         (PV.tclLIFT (N.print_debug (Pp.str "nunchaku returned `unknown`")))
         (PV.tclUNIT ())
-    | Counter_ex str ->
-      PV.tclTHEN
-        (PV.tclLIFT (N.print_warning (Pp.str "Nunchaku found a counter-example")))
-        (PV.tclZERO Nunchaku_counter_ex)
+    | Counter_ex s ->
+      PV.V82.tactic
+        (Tacticals.tclFAIL 0
+           Pp.(str "Nunchaku found a counter-example: " ++ str s))
 
   let timeout : int ref = ref 10
 
@@ -316,6 +316,8 @@ let call (): unit PV.tactic =
        (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
        let pb = Extract.problem_of_goal g in
        let () = Format.fprintf Format.str_formatter "@[<2>problem:@ @[%a@]@]" Ast.pp_statement_list pb in
+       (*
        let pp_pb = Format.flush_str_formatter () in
-       Proofview.V82.tactic @@ Tacticals.tclIDTAC_MESSAGE Pp.(str pp_pb)
-       (* Solve.tactic pb *))
+       Proofview.V82.tactic @@ Tacticals.tclIDTAC_MESSAGE Pp.(str pp_pb);
+          *)
+       Solve.tactic pb)
