@@ -21,7 +21,6 @@ end = struct
   let of_coq_name = function
     | Names.Name.Anonymous -> of_string "_x"
     | Names.Name.Name id -> of_coq_id id
-  let pp = U.Fmt.string
   module Set = Set.Make(String)
   module Map = Map.Make(String)
 
@@ -30,6 +29,18 @@ end = struct
       fresh (id^"'") avoid
     else
       id
+
+  (* adapt to Nunchaku's lexical conventions *)
+  let sanitize (s:string) =
+    let buf = Buffer.create (String.length s) in
+    String.iter
+      (function
+        | '.' -> Buffer.add_char buf '_'
+        | c -> Buffer.add_char buf c)
+      s;
+    Buffer.contents buf
+
+  let pp out id = U.Fmt.string out (sanitize id)
 end
 
 module Builtin : sig
