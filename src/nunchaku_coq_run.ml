@@ -43,14 +43,12 @@ end
     like what Nunchaku will accept. *)
 
 module Coq = struct
-
   let true_  = Coqlib.build_coq_True ()
   let false_ = Coqlib.build_coq_False ()
   let and_   = Coqlib.build_coq_and ()
   let iff_   = Coqlib.build_coq_iff ()
   let or_    = Coqlib.build_coq_or ()
   let eq_    = Coqlib.build_coq_eq ()
-
 end
 
 module Extract : sig
@@ -227,27 +225,34 @@ exception Nunchaku_counter_ex of string
 
 module N = PV.NonLogical
 
+(* mode of operation *)
+type mode =
+  | M_fail
+  | M_warn
+
 module Solve : sig
   type res =
     | Ok
     | Counter_ex of string
     | Unknown of string
+    | Error of string
 
   val call : Ast.problem -> res N.t
   (** Call nunchaku on the given problem *)
 
-  val return_res : res -> unit PV.tactic
+  val return_res : mode -> res -> unit PV.tactic
   (** Return the result to Coq *)
 
   val timeout : int ref
 
-  val tactic : Ast.problem -> unit PV.tactic
+  val tactic : mode:mode -> Ast.problem -> unit PV.tactic
   (** The whole tactic *)
 end = struct
   type res =
     | Ok
     | Counter_ex of string
     | Unknown of string
+    | Error of string
 
   let print_problem out (pb:Ast.problem): unit =
     Format.fprintf out "@[<v>%a@]@." Ast.pp_statement_list pb
@@ -275,23 +280,38 @@ end = struct
         Format.pp_print_flush fmt ();
         close_out oc;
         (* now read Nunchaku's output *)
-        let out = U.IO.read_all ic in
-        let sexp = Nunchaku_coq_sexp.parse_string out in
-        parse_res ~stdout:out sexp
+        try
+          let out = U.IO.read_all ic in
+          let sexp = Nunchaku_coq_sexp.parse_string out in
+          parse_res ~stdout:out sexp
+        with e -> Error (Printexc.to_string e)
       ) |> fst
 
   let call pb = N.make (fun () -> call_ pb)
 
-  let return_res = function
+  let return_res mode = function
     | Ok -> PV.tclUNIT ()
     | Unknown str ->
       PV.tclTHEN
         (PV.tclLIFT (N.print_debug (Pp.str "nunchaku returned `unknown`")))
         (PV.tclUNIT ())
-    | Counter_ex s ->
+    | Error s ->
       PV.V82.tactic
         (Tacticals.tclFAIL 0
-           Pp.(str "Nunchaku found a counter-example: " ++ str s))
+           Pp.(str "error in nunchaku: " ++ str s))
+    | Counter_ex s ->
+      begin match mode with
+        | M_fail -> 
+          PV.V82.tactic
+            (Tacticals.tclFAIL 0
+               Pp.(str "Nunchaku found a counter-example: " ++ str s))
+        | M_warn ->
+          PV.tclTHEN
+            (PV.tclLIFT
+               (N.print_info
+                 Pp.(str "Nunchaku found a counter-example: " ++ str s)))
+            (PV.tclUNIT ())
+      end
 
   let timeout : int ref = ref 10
 
@@ -303,21 +323,23 @@ end = struct
        N.print_error err_msg)
    *)
 
-  let tactic pb =
+  let tactic ~mode pb =
     let t1 = N.timeout !timeout (call pb) in
     PV.tclBIND
       (PV.tclLIFT t1)
-      return_res
+      (return_res mode)
 end
 
-let call (): unit PV.tactic =
+let call ~(mode:mode) (): unit PV.tactic =
   PV.Goal.nf_enter
     (fun g ->
        (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
        let pb = Extract.problem_of_goal g in
-       let () = Format.fprintf Format.str_formatter "@[<2>problem:@ @[%a@]@]" Ast.pp_statement_list pb in
+       let () = Format.fprintf Format.str_formatter
+           "@[<2>problem:@ @[%a@]@]" Ast.pp_statement_list pb
+       in
        (*
        let pp_pb = Format.flush_str_formatter () in
        Proofview.V82.tactic @@ Tacticals.tclIDTAC_MESSAGE Pp.(str pp_pb);
           *)
-       Solve.tactic pb)
+       Solve.tactic ~mode pb)

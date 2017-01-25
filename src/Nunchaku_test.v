@@ -1,12 +1,12 @@
 (* tests for the tactic Nunchaku *)
 
-Require Import Nunchaku.Nunchaku.
+Require Import Nunchaku.
 
 Module pure_logic.
 
   Goal (False -> False) -> False.
   Proof.
-    nunchaku.
+    nunchaku warn.
   Abort.
 
 End pure_logic.
@@ -17,7 +17,7 @@ Module simple_types.
 
   Goal (fun x:A => x) = (fun x:A => x).
   Proof.
-    nunchaku.
+    nunchaku_warn.
   Qed.
 
 End simple_types.
@@ -48,3 +48,8 @@ Proof.
 Qed.
 
 End Section.
+
+Goal (forall (a:Type) p (x:a), p x \/ ~ (p x)).
+Proof.
+  nunchaku_warn.
+Abort.
