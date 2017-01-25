@@ -237,10 +237,16 @@ module Solve : sig
     | Unknown of string
     | Error of string
 
-  val call : Ast.problem -> res N.t
+  type msg =
+    | Msg_warn of Pp.std_ppcmds
+    | Msg_error of Pp.std_ppcmds
+    | Msg_info of Pp.std_ppcmds
+    | Msg_debug  of Pp.std_ppcmds
+
+  val call : Ast.problem -> (res * msg list) N.t
   (** Call nunchaku on the given problem *)
 
-  val return_res : mode -> res -> unit PV.tactic
+  val return_res : mode -> (res * msg list)-> unit PV.tactic
   (** Return the result to Coq *)
 
   val timeout : int ref
@@ -254,12 +260,22 @@ end = struct
     | Unknown of string
     | Error of string
 
+  type msg =
+    | Msg_warn of Pp.std_ppcmds
+    | Msg_error of Pp.std_ppcmds
+    | Msg_info of Pp.std_ppcmds
+    | Msg_debug  of Pp.std_ppcmds
+
+  type state = {
+    mutable msgs: msg list; 
+  }
+
   let print_problem out (pb:Ast.problem): unit =
     Format.fprintf out "@[<v>%a@]@." Ast.pp_statement_list pb
 
   module Sexp = Nunchaku_coq_sexp
 
-  let parse_res ~stdout (sexp:Sexp.t): res = match sexp with
+  let parse_res ~stdout state (sexp:Sexp.t): res = match sexp with
     | `Atom "UNSAT" -> Ok
     | `Atom "TIMEOUT" -> Unknown ("timeout\n" ^ stdout)
     | `Atom "UNKNOWN" -> Unknown ("unknown\n" ^ stdout)
@@ -271,47 +287,69 @@ end = struct
 
   let timeout = 10
 
-  let call_ pb : res =
+  let add_msg state (m:msg) =
+    state.msgs <- m :: state.msgs
+
+  let call_ pb : res * msg list =
+    let state = {msgs=[]} in
     let cmd = Printf.sprintf "nunchaku -o sexp -i nunchaku -nc -t %d" timeout in
-    U.IO.popen cmd
-      ~f:(fun (oc,ic) ->
-        let fmt = Format.formatter_of_out_channel oc in
-        print_problem fmt pb;
-        Format.pp_print_flush fmt ();
-        close_out oc;
-        (* now read Nunchaku's output *)
-        try
-          let out = U.IO.read_all ic in
-          let sexp = Nunchaku_coq_sexp.parse_string out in
-          parse_res ~stdout:out sexp
-        with e -> Error (Printexc.to_string e)
-      ) |> fst
+    let res =
+      U.IO.popen cmd
+        ~f:(fun (oc,ic) ->
+          let input = Format.asprintf "%a@." print_problem pb in
+          add_msg state (Msg_debug Pp.(str "nunchaku input:" ++ str input));
+          output_string oc input;
+          flush oc; close_out oc;
+          (* now read Nunchaku's output *)
+          try
+            let out = U.IO.read_all ic in
+            add_msg state (Msg_debug Pp.(str "nunchaku output:" ++ str out));
+            let sexp = Nunchaku_coq_sexp.parse_string out in
+            parse_res ~stdout:out state sexp
+          with e -> Error (Printexc.to_string e)
+        ) |> fst
+    in
+    res, List.rev state.msgs
 
   let call pb = N.make (fun () -> call_ pb)
 
-  let return_res mode = function
-    | Ok -> PV.tclUNIT ()
-    | Unknown str ->
-      PV.tclTHEN
-        (PV.tclLIFT (N.print_debug (Pp.str "nunchaku returned `unknown`")))
-        (PV.tclUNIT ())
-    | Error s ->
-      PV.V82.tactic
-        (Tacticals.tclFAIL 0
-           Pp.(str "error in nunchaku: " ++ str s))
-    | Counter_ex s ->
-      begin match mode with
-        | M_fail -> 
-          PV.V82.tactic
-            (Tacticals.tclFAIL 0
-               Pp.(str "Nunchaku found a counter-example: " ++ str s))
-        | M_warn ->
-          PV.tclTHEN
-            (PV.tclLIFT
-               (N.print_info
-                 Pp.(str "Nunchaku found a counter-example: " ++ str s)))
-            (PV.tclUNIT ())
-      end
+  let pp_msg = function
+    | Msg_info s -> N.print_info s
+    | Msg_error s -> N.print_error s
+    | Msg_warn s -> N.print_warning s
+    | Msg_debug s -> N.print_debug s
+
+  let pp_msgs l = N.List.iter pp_msg l
+
+  let return_res mode (res,msgs) =
+    let main =  match res with
+      | Ok -> PV.tclUNIT ()
+      | Unknown str ->
+        PV.tclTHEN
+          (PV.tclLIFT (N.print_debug (Pp.str "nunchaku returned `unknown`")))
+          (PV.tclUNIT ())
+      | Error s ->
+        PV.V82.tactic
+          (Tacticals.tclFAIL 0
+             Pp.(str "error in nunchaku: " ++ str s))
+      | Counter_ex s ->
+        begin match mode with
+          | M_fail -> 
+            PV.V82.tactic
+              (Tacticals.tclFAIL 0
+                 Pp.(str "Nunchaku found a counter-example: " ++ str s))
+          | M_warn ->
+            (* just a warning *)
+            PV.tclTHEN
+              (PV.tclLIFT
+                 (N.print_warning
+                    Pp.(str "Nunchaku found a counter-example: " ++ str s)))
+              (PV.tclUNIT ())
+        end
+    in
+    PV.tclTHEN
+      (PV.tclLIFT (N.List.iter pp_msg msgs))
+      main
 
   let timeout : int ref = ref 10
 
