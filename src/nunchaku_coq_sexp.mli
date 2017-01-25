@@ -75,18 +75,5 @@ module Decoder : sig
       long enough or isn't a proper S-expression *)
 end
 
-val parse_string : string -> t
+val parse_string : string -> (t,string) result
 (** Parse a string *)
-
-val parse_chan : in_channel -> t
-(** Parse a S-expression from the given channel. Can read more data than
-    necessary, so don't use this if you need finer-grained control (e.g.
-    to read something else {b after} the S-exp) *)
-
-val parse_chan_list : in_channel -> t list
-
-val parse_file : string -> t
-(** Open the file and read a S-exp from it *)
-
-val parse_file_list : string -> t list
-(** Open the file and read a S-exp from it *)

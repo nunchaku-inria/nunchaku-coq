@@ -16,25 +16,24 @@ let fpf = Format.fprintf
 (** {2 Intermediate AST} *)
 module Ast = Nunchaku_coq_ast
 
-(** {2 Debug Output}
+(** {2 Debug Output} *)
 
-    We optionally write to a file.
-    TODO: use environment variable instead? Or pure Coq options? *)
-
-let log_active = true (* if true, {!Log.output} will write to some file *)
+type level = Pp.message_level
+type log_msg = level * Pp.std_ppcmds
 
 module Log : sig
-  val output : string -> unit
-  val outputf : ('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a
+  val output : level -> string -> unit
+  val outputf : level -> ('a, Format.formatter, unit, unit, unit, unit) format6 -> 'a
+  val pop_logs : unit -> log_msg list
 end = struct
-  let output =
-    if log_active then (
-      let oc = open_out "/tmp/nunchaku_coq.log" in
-      fun s ->
-        output_string oc s; output_char oc '\n'; flush oc
-    ) else (fun _ -> ())
+  let st_ : log_msg list ref = ref []
 
-  let outputf msg = U.Fmt.ksprintf msg ~f:output
+  let output l s = st_ := (l,Pp.str s) :: !st_
+  let outputf l msg = U.Fmt.ksprintf msg ~f:(output l)
+  let pop_logs () =
+    let l = List.rev !st_ in
+    st_ := [];
+    l
 end
 
 (** {2 Problem Extraction}
@@ -232,21 +231,15 @@ type mode =
 
 module Solve : sig
   type res =
-    | Ok
+    | Check_ok
     | Counter_ex of string
     | Unknown of string
-    | Error of string
+    | Check_error of string
 
-  type msg =
-    | Msg_warn of Pp.std_ppcmds
-    | Msg_error of Pp.std_ppcmds
-    | Msg_info of Pp.std_ppcmds
-    | Msg_debug  of Pp.std_ppcmds
-
-  val call : Ast.problem -> (res * msg list) N.t
+  val call : Ast.problem -> (res * log_msg list) N.t
   (** Call nunchaku on the given problem *)
 
-  val return_res : mode -> (res * msg list)-> unit PV.tactic
+  val return_res : mode -> (res * log_msg list)-> unit PV.tactic
   (** Return the result to Coq *)
 
   val timeout : int ref
@@ -255,28 +248,18 @@ module Solve : sig
   (** The whole tactic *)
 end = struct
   type res =
-    | Ok
+    | Check_ok
     | Counter_ex of string
     | Unknown of string
-    | Error of string
-
-  type msg =
-    | Msg_warn of Pp.std_ppcmds
-    | Msg_error of Pp.std_ppcmds
-    | Msg_info of Pp.std_ppcmds
-    | Msg_debug  of Pp.std_ppcmds
-
-  type state = {
-    mutable msgs: msg list; 
-  }
+    | Check_error of string
 
   let print_problem out (pb:Ast.problem): unit =
     Format.fprintf out "@[<v>%a@]@." Ast.pp_statement_list pb
 
   module Sexp = Nunchaku_coq_sexp
 
-  let parse_res ~stdout state (sexp:Sexp.t): res = match sexp with
-    | `Atom "UNSAT" -> Ok
+  let parse_res ~stdout (sexp:Sexp.t): res = match sexp with
+    | `Atom "UNSAT" -> Check_ok
     | `Atom "TIMEOUT" -> Unknown ("timeout\n" ^ stdout)
     | `Atom "UNKNOWN" -> Unknown ("unknown\n" ^ stdout)
     | `List [`Atom "SAT"; _model] ->
@@ -287,48 +270,50 @@ end = struct
 
   let timeout = 10
 
-  let add_msg state (m:msg) =
-    state.msgs <- m :: state.msgs
-
-  let call_ pb : res * msg list =
-    let state = {msgs=[]} in
+  let call_ pb : res * log_msg list =
     let cmd = Printf.sprintf "nunchaku -o sexp -i nunchaku -nc -t %d" timeout in
     let res =
       U.IO.popen cmd
         ~f:(fun (oc,ic) ->
           let input = Format.asprintf "%a@." print_problem pb in
-          add_msg state (Msg_debug Pp.(str "nunchaku input:" ++ str input));
+          Log.outputf (Pp.Debug "nunchaku") "@[<v>nunchaku input:@ `%s`@]@." input;
           output_string oc input;
           flush oc; close_out oc;
           (* now read Nunchaku's output *)
           try
             let out = U.IO.read_all ic in
-            add_msg state (Msg_debug Pp.(str "nunchaku output:" ++ str out));
-            let sexp = Nunchaku_coq_sexp.parse_string out in
-            parse_res ~stdout:out state sexp
-          with e -> Error (Printexc.to_string e)
+            Log.outputf (Pp.Debug "nunchaku") "@[<v>nunchaku output:@ `%s`@]@." out;
+            if out="" then Check_error "empty output from Nunchaku"
+            else begin match Nunchaku_coq_sexp.parse_string out with
+              | Ok sexp -> parse_res ~stdout:out sexp
+              | Error msg -> Check_error msg
+            end
+          with e ->
+            Check_error (Printexc.to_string e)
         ) |> fst
     in
-    res, List.rev state.msgs
+    let logs = Log.pop_logs () in
+    res, logs
 
   let call pb = N.make (fun () -> call_ pb)
 
-  let pp_msg = function
-    | Msg_info s -> N.print_info s
-    | Msg_error s -> N.print_error s
-    | Msg_warn s -> N.print_warning s
-    | Msg_debug s -> N.print_debug s
+  let pp_msg (l,s) = match l with
+    | Pp.Info -> N.print_info s
+    | Pp.Error -> N.print_error s
+    | Pp.Warning -> N.print_warning s
+    | Pp.Debug _ -> N.print_debug s
+    | Pp.Notice -> N.print_notice s
 
   let pp_msgs l = N.List.iter pp_msg l
 
   let return_res mode (res,msgs) =
     let main =  match res with
-      | Ok -> PV.tclUNIT ()
+      | Check_ok -> PV.tclUNIT ()
       | Unknown str ->
         PV.tclTHEN
           (PV.tclLIFT (N.print_debug (Pp.str "nunchaku returned `unknown`")))
           (PV.tclUNIT ())
-      | Error s ->
+      | Check_error s ->
         PV.V82.tactic
           (Tacticals.tclFAIL 0
              Pp.(str "error in nunchaku: " ++ str s))
@@ -373,11 +358,4 @@ let call ~(mode:mode) (): unit PV.tactic =
     (fun g ->
        (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
        let pb = Extract.problem_of_goal g in
-       let () = Format.fprintf Format.str_formatter
-           "@[<2>problem:@ @[%a@]@]" Ast.pp_statement_list pb
-       in
-       (*
-       let pp_pb = Format.flush_str_formatter () in
-       Proofview.V82.tactic @@ Tacticals.tclIDTAC_MESSAGE Pp.(str pp_pb);
-          *)
        Solve.tactic ~mode pb)

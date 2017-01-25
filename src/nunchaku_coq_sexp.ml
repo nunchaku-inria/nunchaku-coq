@@ -193,83 +193,10 @@ end
 let fail_eof () = raise End_of_file
 let fail_ s = failwith ("sexp parsing failed: " ^ s)
 
-let parse_string s : t =
+let parse_string s : (t,string) result =
   let buf = Lexing.from_string s in
   let d = Decoder.of_lexbuf buf in
   match Decoder.next d with
-  | End -> fail_eof()
-  | Yield x -> x
-  | Fail s -> fail_ s
-
-(*$T
-  CCResult.to_opt (parse_string "(abc d/e/f \"hello \\\" () world\" )") <> None
-  CCResult.to_opt (parse_string "(abc ( d e ffff   ) \"hello/world\")") <> None
-  CCResult.to_opt (parse_string "\"\123\bcoucou\"") <> None
-*)
-
-(*$inject
-  let sexp_gen =
-    let mkatom a = `Atom a and mklist l = `List l in
-    let atom = Q.Gen.(map mkatom (string_size ~gen:printable (1 -- 30))) in
-    let gen = Q.Gen.(
-      sized (fix
-        (fun self n st -> match n with
-        | 0 -> atom st
-        | _ ->
-          frequency
-            [ 1, atom
-            ; 2, map mklist (list_size (0 -- 10) (self (n/10)))
-            ] st
-        )
-    )) in
-    let rec small = function
-      | `Atom s -> String.length s
-      |  `List l -> List.fold_left (fun n x->n+small x) 0 l
-    and print = function
-      | `Atom s -> Printf.sprintf "`Atom \"%s\"" s
-      | `List l -> "`List " ^ Q.Print.list print l
-    and shrink = function
-      | `Atom s -> Q.Iter.map mkatom (Q.Shrink.string s)
-      | `List l -> Q.Iter.map mklist (Q.Shrink.list ~shrink l)
-    in
-    Q.make ~print ~small ~shrink gen
-
-  let rec sexp_valid  = function
-    | `Atom "" -> false
-    | `Atom _ -> true
-    | `List l -> List.for_all sexp_valid l
-*)
-
-(*$Q & ~count:100
-    sexp_gen (fun s -> sexp_valid s ==> (to_string s |> parse_string = Result.Ok s))
-*)
-
-let parse_chan ic : sexp =
-  let buf = Lexing.from_channel ic in
-  let d = Decoder.of_lexbuf buf in
-  match Decoder.next d with
-  | End -> fail_eof()
-  | Yield x -> x
-  | Fail e -> fail_ e
-
-let parse_chan_list ic =
-  let buf = Lexing.from_channel ic in
-  let d = Decoder.of_lexbuf buf in
-  let rec iter acc = match Decoder.next d with
-    | End -> List.rev acc
-    | Yield x -> iter (x::acc)
-    | Fail e -> fail_ e
-  in
-  iter []
-
-let parse_chan_gen ic =
-  let buf = Lexing.from_channel ic in
-  let d = Decoder.of_lexbuf buf in
-  fun () -> match Decoder.next d with
-    | End -> None
-    | Fail e -> fail_ e
-    | Yield x -> Some x
-
-let parse_file filename = _with_in filename parse_chan
-
-let parse_file_list filename = _with_in filename parse_chan_list
+    | End -> Error "unexpected end of file"
+    | Yield x -> Ok x
+    | Fail s -> Error s
