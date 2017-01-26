@@ -52,6 +52,10 @@ end
 
 val pp_term : Term.constr Fmt.printer
 
+module List : sig
+  val fold_map : ('a -> 'b -> 'a * 'c) -> 'a -> 'b list -> 'a * 'c list
+end
+
 module Array : sig
   type 'a t = 'a array
   val for_all : f:('a -> bool) -> 'a t -> bool

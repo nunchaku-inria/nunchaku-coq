@@ -121,11 +121,14 @@ end = struct
     in
     fpf out "[@[%a@]]" (U.Fmt.list pp_pair) l
 
-  (* recover the statement defining/declaring [l] *)
-  let fetch_def_of_label env (l:Names.Label.t): Ast.statement =
-    assert false (* TODO *)
+  let id_of_const (cn:Names.constant): Ast.Nun_id.t =
+    Names.(cn |> Constant.user |> KerName.to_string |> Ast.Nun_id.of_string)
 
-  let term_of_coq (t:coq_term) : Ast.term =
+  (* convert [t] into a Nunchaku term, and return the list of constants
+     occurring in [t] *)
+  let term_of_coq (t:coq_term) : Ast.term * Names.constant list =
+    let module A = Ast in
+    let constants = ref [] in
     (* adds a fresh (in subst) identifier based on [x] as the 0-th
        element of subst. *)
     (* TODO: subst should probably be a map. *)
@@ -135,16 +138,17 @@ end = struct
       fresh::subst
     in
     let rec simple_type_of_coq (subst:Ast.id list) (t:coq_term) : Ast.ty =
-      let open Ast in
       match Constr.kind t with
+      | Constr.Sort (Sorts.Prop _) -> A.ty_prop
+      | Constr.Sort (Sorts.Type _) -> A.ty_type
       | Constr.Prod (_,a,b) when not (Termops.dependent (Constr.mkRel 1) b) ->
-        ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq subst b)
+        A.ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq subst b)
       | Constr.Const (cn,_) ->
-        Names.(cn |> Constant.user |> KerName.to_string |> Nun_id.of_string |> var)
+        constants := cn :: !constants;
+        A.var (id_of_const cn)
       | _ -> assert false
     in
     let rec term_of_coq (subst:Ast.id list) (t:coq_term) : Ast.term =
-      let module A = Ast in
       match Constr.kind t with
       (* Propositional connectives. *)
       | _ when Constr.equal t Coq.true_ -> A.true_
@@ -181,7 +185,8 @@ end = struct
       | Constr.Var _ -> failwith "TODO: term_of_coq: Var"
       (* Toplevel definitions *)
       | Constr.Const (cn,_) ->
-        Names.(cn |> Constant.user |> KerName.to_string |> A.Nun_id.of_string |> A.var)
+        constants := cn :: !constants;
+        A.var (id_of_const cn)
       | Constr.Ind _ -> failwith "TODO: term_of_coq: Ind"
       | Constr.Construct _ -> failwith "TODO: term_of_coq: Construct"
       (* Pattern Matching & fixed points *)
@@ -193,9 +198,68 @@ end = struct
       | Constr.Meta _ -> failwith "Metas not supported"
       | Constr.Evar _ -> failwith "Evars not supported"
       (* Types *)
-      | Constr.Sort _ -> failwith "TODO: term_of_coq: Sort"
+      | Constr.Sort (Sorts.Prop _)
+      | Constr.Sort (Sorts.Type _) -> failwith "TODO: term_of_coq: Sort"
     in
-    term_of_coq [] t
+    let new_t = term_of_coq [] t in
+    new_t, !constants
+
+  (* recover the statement defining/declaring [l] *)
+  let fetch_def_of_label env (c:Names.constant): Ast.statement * Names.constant list =
+    let module D = Declarations in
+    Log.outputf (Pp.Debug "nunchaku") "fetch_def_of_label %s@."
+      (Names.Constant.to_string c);
+    let decl = Environ.lookup_constant c env in
+    Log.outputf (Pp.Debug "nunchaku") "stmt_of_decl @.";
+    (* convert type *)
+    let ty = match decl.D.const_type with
+      | D.RegularArity ty -> ty
+      | D.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
+    in
+    let ty, new_consts = term_of_coq ty in
+    (* convert definition (if any) *)
+    let def = decl.D.const_body in
+    let stmt = match def with
+      | D.Undef _ ->
+        Ast.decl ~attrs:[] (id_of_const c) ty
+      | _ -> 
+        Ast.axiom [Ast.true_] (* TODO *)
+    in
+    stmt, new_consts
+
+  (* main state for recursively gathering definitions + axioms *)
+  type state = {
+    env: Environ.env;
+    (* global environment *)
+    mutable processed: Names.Cset.t;
+    (* set of already processed names *)
+    mutable new_stmts: Ast.statement list;
+    (* new statements, reversed *)
+  }
+
+  let create_state env =
+    { env;
+      processed=Names.Cset.empty;
+      new_stmts=[];
+    }
+
+  (* recursively recover all dependencies from the given names *)
+  let gather_deps env (root_constants: Names.constant list): Ast.statement list =
+    let state = create_state env in
+    (* recursive traversal, DFS, to enforce proper ordering of
+       statements (i.e. definitions precede their use) *)
+    let rec explore (c:Names.constant): unit =
+      if not (Names.Cset.mem c state.processed) then (
+        state.processed <- Names.Cset.add c state.processed;
+        let stmt, deps = fetch_def_of_label state.env c in
+        (* first, explore dependencies *)
+        List.iter explore deps;
+        (* then only we can push the new statement *)
+        state.new_stmts <- stmt :: state.new_stmts;
+      )
+    in
+    List.iter explore root_constants;
+    List.rev state.new_stmts
 
   let problem_of_goal (g:[`NF] PV.Goal.t) : Ast.problem =
     let concl = PV.Goal.concl g in
@@ -214,14 +278,22 @@ end = struct
     in
     Log.outputf "@[<2>ctxmap: %a@]" pp_ctxmap ctxmap;
     *)
-    let concl = term_of_coq concl in
-    let hyps = List.map term_of_coq hyps in
+    let concl, cs_list = term_of_coq concl in
+    let cs_list, hyps =
+      Util.List.fold_map
+        (fun cs_list t ->
+           let t', cs_list' = term_of_coq t in
+           cs_list' @ cs_list, t')
+        cs_list hyps
+    in
     let goal =
       match hyps with
-      | [] -> Ast.not_ concl
-      | hyps -> Ast.(not_ @@ imply (and_ hyps) concl)
+        | [] -> Ast.not_ concl
+        | hyps -> Ast.(not_ @@ imply (and_ hyps) concl)
     in
-    [Ast.goal goal]
+    (* pull dependencies (axioms and definitions) recursively *)
+    let decls = gather_deps env cs_list in
+    decls @ [Ast.goal goal]
 end
 
 exception Nunchaku_counter_ex of string

@@ -261,3 +261,14 @@ module IO = struct
          x, res
       )
 end
+
+module List = struct
+  let fold_map f acc l =
+    let rec aux f acc map_acc l = match l with
+      | [] -> acc, List.rev map_acc
+      | x :: l' ->
+        let acc, y = f acc x in
+        aux f acc (y :: map_acc) l'
+    in
+    aux f acc [] l
+end
