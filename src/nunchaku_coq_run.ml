@@ -144,32 +144,36 @@ end = struct
       | _ -> assert false
     in
     let rec term_of_coq (subst:Ast.id list) (t:coq_term) : Ast.term =
-      let open Ast in
+      let module A = Ast in
       match Constr.kind t with
       (* Propositional connectives. *)
-      | _ when Constr.equal t Coq.true_ -> true_
-      | _ when Constr.equal t Coq.false_ -> false_
+      | _ when Constr.equal t Coq.true_ -> A.true_
+      | _ when Constr.equal t Coq.false_ -> A.false_
       | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.and_ ->
-        and_ [term_of_coq subst p ; term_of_coq subst q]
+        A.and_ [term_of_coq subst p ; term_of_coq subst q]
       | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.or_ ->
-        or_ [term_of_coq subst p ; term_of_coq subst q]
+        A.or_ [term_of_coq subst p ; term_of_coq subst q]
       | Constr.App (h, [| p ; q |]) when Constr.equal h Coq.iff_ ->
-        equiv (term_of_coq subst p) (term_of_coq subst q)
+        A.equiv (term_of_coq subst p) (term_of_coq subst q)
       | Constr.App (h, [| _ ; p ; q |]) when Globnames.is_global Coq.eq_ h ->
-        eq (term_of_coq subst p) (term_of_coq subst q)
-      (* arnaud: todo: je crois qu'il y a une fonction de bibliothèque pour tester si le de Bruijn 1 est dans un terme. Fix here and above. *)
+        A.eq (term_of_coq subst p) (term_of_coq subst q)
+      (* arnaud: todo: je crois qu'il y a une fonction de bibliothèque pour
+         tester si le de Bruijn 1 est dans un terme. Fix here and above. *)
       | Constr.Prod (_,p,q) when not (Termops.dependent (Constr.mkRel 1) q) ->
-        imply (term_of_coq subst p) (term_of_coq subst q)
+        A.imply (term_of_coq subst p) (term_of_coq subst q)
+      | Constr.Prod (_,a,f) when Constr.equal f Coq.false_ ->
+        (* [a -> false] becomes [not a] *)
+        A.not_ (term_of_coq subst a)
       | Constr.Prod _ -> failwith "TODO: term_of_coq: Prod"
-      (* TODO: not *)
       (* /Propositional connectives *)
       (* simply-typed λ-calculus *)
       | Constr.Lambda (x,t,u) ->
-        let (x::_) as subst = push_fresh x subst in
-        fun_ (x, simple_type_of_coq subst t) (term_of_coq subst u)
+        let subst = push_fresh x subst in
+        let x = List.hd subst in
+        A.fun_ (x, simple_type_of_coq subst t) (term_of_coq subst u)
       | Constr.App (x, args) ->
-        app (term_of_coq subst x) Array.(map (term_of_coq subst) args |> to_list)
-      | Constr.Rel n -> var @@ List.nth subst (n-1)
+        A.app (term_of_coq subst x) Array.(map (term_of_coq subst) args |> to_list)
+      | Constr.Rel n -> A.var @@ List.nth subst (n-1)
       (* Misc *)
       | Constr.LetIn _ -> failwith "TODO: term_of_coq: LetIn"
       | Constr.Cast _ -> failwith "TODO: term_of_coq: Cast"
@@ -177,7 +181,7 @@ end = struct
       | Constr.Var _ -> failwith "TODO: term_of_coq: Var"
       (* Toplevel definitions *)
       | Constr.Const (cn,_) ->
-        Names.(cn |> Constant.user |> KerName.to_string |> Nun_id.of_string |> var)
+        Names.(cn |> Constant.user |> KerName.to_string |> A.Nun_id.of_string |> A.var)
       | Constr.Ind _ -> failwith "TODO: term_of_coq: Ind"
       | Constr.Construct _ -> failwith "TODO: term_of_coq: Construct"
       (* Pattern Matching & fixed points *)
