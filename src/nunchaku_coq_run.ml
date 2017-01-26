@@ -18,7 +18,7 @@ module Ast = Nunchaku_coq_ast
 
 (** {2 Debug Output} *)
 
-type level = Pp.message_level
+type level = Feedback.level
 type log_msg = level * Pp.std_ppcmds
 
 module Log : sig
@@ -51,7 +51,7 @@ module Coq = struct
 end
 
 module Extract : sig
-  val problem_of_goal : [`NF] PV.Goal.t -> Ast.problem
+  val problem_of_goal : ([`NF],_) PV.Goal.t -> Ast.problem
 end = struct
   let string_of_globname (n:Globnames.global_reference): string =
     let module G = Globnames in
@@ -104,22 +104,6 @@ end = struct
       U.Fmt.(list string) (l_of_refset_env set)
       U.Fmt.(list pp_map_entry) (l_of_map1 map)
       U.Fmt.(list pp_map2_entry) (l_of_map2 map2)
-
-  let string_of_ctx_object (x:Printer.context_object): string = match x with
-    | Printer.Variable id -> Names.string_of_id id
-    | Printer.Axiom (c,trip) ->
-      U.Fmt.sprintf "(@[axiom %s@ : [@[<hv>%a@]]@])"
-        (Names.string_of_con c) (U.Fmt.list pp_triple) trip
-    | Printer.Opaque c -> U.Fmt.sprintf "(opaque %s)" (Names.string_of_con c)
-    | Printer.Transparent c ->
-      U.Fmt.sprintf "(transparent %s)" (Names.string_of_con c)
-
-  let pp_ctxmap out map =
-    let l = Printer.ContextObjectMap.fold (fun k ty acc ->(k,ty)::acc) map [] in
-    let pp_pair out (key,ty) =
-      fpf out "%s: %a" (string_of_ctx_object key) U.pp_term ty
-    in
-    fpf out "[@[%a@]]" (U.Fmt.list pp_pair) l
 
   let id_of_const (cn:Names.constant): Ast.Nun_id.t =
     Names.(cn |> Constant.user |> KerName.to_string |> Ast.Nun_id.of_string)
@@ -207,10 +191,10 @@ end = struct
   (* recover the statement defining/declaring [l] *)
   let fetch_def_of_label env (c:Names.constant): Ast.statement * Names.constant list =
     let module D = Declarations in
-    Log.outputf (Pp.Debug "nunchaku") "fetch_def_of_label %s@."
+    Log.outputf Feedback.Debug "fetch_def_of_label %s@."
       (Names.Constant.to_string c);
     let decl = Environ.lookup_constant c env in
-    Log.outputf (Pp.Debug "nunchaku") "stmt_of_decl @.";
+    Log.outputf Feedback.Debug "stmt_of_decl @.";
     (* convert type *)
     let ty = match decl.D.const_type with
       | D.RegularArity ty -> ty
@@ -261,10 +245,16 @@ end = struct
     List.iter explore root_constants;
     List.rev state.new_stmts
 
-  let problem_of_goal (g:[`NF] PV.Goal.t) : Ast.problem =
+  let problem_of_goal (g:([`NF],_) PV.Goal.t) : Ast.problem =
     let concl = PV.Goal.concl g in
     let env = PV.Goal.env g in
-    let hyps = List.map Util.pi3 (PV.Goal.hyps g) in
+    let hyps =
+      PV.Goal.hyps g
+      |> List.map
+        (function
+          | Context.Named.Declaration.LocalAssum (_,ty)
+          | Context.Named.Declaration.LocalDef (_,_,ty) -> ty)
+    in
     (* call this handy function to get all dependencies *)
     (* let set, map, map2 = *)
     (*   Assumptions.traverse (Names.Label.make "Top") g_term *)
@@ -352,13 +342,13 @@ end = struct
       U.IO.popen cmd
         ~f:(fun (oc,ic) ->
           let input = Format.asprintf "%a@." print_problem pb in
-          Log.outputf (Pp.Debug "nunchaku") "@[<v>nunchaku input:@ `%s`@]@." input;
+          Log.outputf Feedback.Debug "@[<v>nunchaku input:@ `%s`@]@." input;
           output_string oc input;
           flush oc; close_out oc;
           (* now read Nunchaku's output *)
           try
             let out = U.IO.read_all ic in
-            Log.outputf (Pp.Debug "nunchaku") "@[<v>nunchaku output:@ `%s`@]@." out;
+            Log.outputf Feedback.Debug "@[<v>nunchaku output:@ `%s`@]@." out;
             if out="" then Check_error "empty output from Nunchaku"
             else begin match Nunchaku_coq_sexp.parse_string out with
               | Ok sexp -> parse_res ~stdout:out sexp
@@ -374,11 +364,11 @@ end = struct
   let call pb = N.make (fun () -> call_ pb)
 
   let pp_msg (l,s) = match l with
-    | Pp.Info -> N.print_info s
-    | Pp.Error -> N.print_error s
-    | Pp.Warning -> N.print_warning s
-    | Pp.Debug _ -> N.print_debug s
-    | Pp.Notice -> N.print_notice s
+    | Feedback.Info -> N.print_info s
+    | Feedback.Error -> N.print_error s
+    | Feedback.Warning -> N.print_warning s
+    | Feedback.Debug -> N.print_debug s
+    | Feedback.Notice -> N.print_notice s
 
   let pp_msgs l = N.List.iter pp_msg l
 
@@ -431,7 +421,7 @@ end
 
 let call ~(mode:mode) (): unit PV.tactic =
   PV.Goal.nf_enter
-    (fun g ->
+    {PV.Goal.enter=fun g ->
        (*PV.tclLIFT (N.print_debug (Pp.str ("extract from goal: " ^ Prettyp.default_object_pr.Prettyp. *)
        let pb = Extract.problem_of_goal g in
-       Solve.tactic ~mode pb)
+       Solve.tactic ~mode pb}
