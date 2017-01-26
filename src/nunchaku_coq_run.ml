@@ -271,7 +271,7 @@ end = struct
   let timeout = 10
 
   let call_ pb : res * log_msg list =
-    let cmd = Printf.sprintf "nunchaku -o sexp -i nunchaku -nc -t %d" timeout in
+    let cmd = Printf.sprintf "nunchaku -o sexp -i nunchaku -nc -t %d 2>&1" timeout in
     let res =
       U.IO.popen cmd
         ~f:(fun (oc,ic) ->
