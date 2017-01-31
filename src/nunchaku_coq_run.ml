@@ -182,8 +182,9 @@ end = struct
       | Constr.Meta _ -> failwith "Metas not supported"
       | Constr.Evar _ -> failwith "Evars not supported"
       (* Types *)
-      | Constr.Sort (Sorts.Prop _)
-      | Constr.Sort (Sorts.Type _) -> failwith "TODO: term_of_coq: Sort"
+      | Constr.Sort (Sorts.Prop _) -> A.ty_prop
+      | Constr.Sort (Sorts.Type _) ->
+        failwith "TODO: term_of_coq: Sort" (* should not occur in terms for now *)
     in
     let new_t = term_of_coq [] t in
     new_t, !constants

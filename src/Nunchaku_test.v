@@ -2,6 +2,8 @@
 
 Require Import Nunchaku.
 
+Set Info Level 10.
+
 Module pure_logic.
 
   Goal (False -> False) -> False.
@@ -17,8 +19,8 @@ Module simple_types.
 
   Goal (fun x:A => x) = (fun x:A => x).
   Proof.
-    nunchaku_warn.
-  Qed.
+    nunchaku warn.
+  Abort.
 
 End simple_types.
 
@@ -43,13 +45,12 @@ Axiom def_a : A = p n_4.
 
 Goal p n_4 /\ A -> B.
 Proof.
-  nunchaku.
-  Abort.
-Qed.
+  nunchaku warn.
+Abort.
 
 End Section.
 
 Goal (forall (a:Type) p (x:a), p x \/ ~ (p x)).
 Proof.
-  nunchaku_warn.
+  nunchaku warn.
 Abort.
