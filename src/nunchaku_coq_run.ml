@@ -191,26 +191,31 @@ end = struct
 
   (* recover the statement defining/declaring [l] *)
   let fetch_def_of_label env (c:Names.constant): Ast.statement * Names.constant list =
-    let module D = Declarations in
     Log.outputf Feedback.Debug "fetch_def_of_label %s@."
       (Names.Constant.to_string c);
     let decl = Environ.lookup_constant c env in
     Log.outputf Feedback.Debug "stmt_of_decl @.";
     (* convert type *)
-    let ty = match decl.D.const_type with
-      | D.RegularArity ty -> ty
-      | D.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
+    let ty = match decl.Declarations.const_type with
+      | Declarations.RegularArity ty -> ty
+      | Declarations.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
     in
     let ty, new_consts = term_of_coq ty in
     (* convert definition (if any) *)
-    let def = decl.D.const_body in
-    let stmt = match def with
-      | D.Undef _ ->
-        Ast.decl ~attrs:[] (id_of_const c) ty
-      | _ -> 
-        Ast.axiom [Ast.true_] (* TODO *)
+    let def = decl.Declarations.const_body in
+    let stmt, new_consts' = match def with
+      | Declarations.Undef _ ->
+        Ast.decl ~attrs:[] (id_of_const c) ty, []
+      | Declarations.Def def ->
+        let t, new_consts' =
+          Mod_subst.force_constr def
+          |> term_of_coq
+        in
+        Ast.def (id_of_const c) t, new_consts'
+      | Declarations.OpaqueDef _ -> 
+        Ast.axiom [Ast.true_], [] (* TODO *)
     in
-    stmt, new_consts
+    stmt, List.rev_append new_consts new_consts'
 
   (* main state for recursively gathering definitions + axioms *)
   type state = {
