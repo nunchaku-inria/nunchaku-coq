@@ -191,6 +191,8 @@ let pp_term out csr =
   in
   term_display out csr
 
+let is_Type = Term.is_Type
+
 module Array = struct
   type 'a t = 'a array
 

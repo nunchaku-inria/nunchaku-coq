@@ -108,11 +108,32 @@ end = struct
   let id_of_const (cn:Names.constant): Ast.Nun_id.t =
     Names.(cn |> Constant.user |> KerName.to_string |> Ast.Nun_id.of_string)
 
+  let id_of_minds (m:Names.MutInd.t): Ast.Nun_id.t =
+    Names.MutInd.to_string m |> Ast.Nun_id.of_string
+
+  type deps = {
+    dep_consts: Names.constant list;
+    dep_minds: Names.mutual_inductive list;
+  }
+
+  let dep_empty = {
+    dep_consts=[];
+    dep_minds=[];
+  }
+
+  let dep_add_cn c deps = {deps with dep_consts=c::deps.dep_consts}
+  let dep_add_mind x deps = {deps with dep_minds=x::deps.dep_minds}
+
+  let dep_merge a b = {
+    dep_consts=a.dep_consts@b.dep_consts;
+    dep_minds=a.dep_minds@b.dep_minds;
+  }
+
   (* convert [t] into a Nunchaku term, and return the list of constants
      occurring in [t] *)
-  let term_of_coq (t:coq_term) : Ast.term * Names.constant list =
+  let term_of_coq (env:Environ.env) (t:coq_term) : Ast.term * deps =
     let module A = Ast in
-    let constants = ref [] in
+    let deps : deps ref = ref dep_empty in
     (* adds a fresh (in subst) identifier based on [x] as the 0-th
        element of subst. *)
     (* TODO: subst should probably be a map. *)
@@ -128,7 +149,7 @@ end = struct
       | Constr.Prod (_,a,b) when not (Termops.dependent (Constr.mkRel 1) b) ->
         A.ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq subst b)
       | Constr.Const (cn,_) ->
-        constants := cn :: !constants;
+        deps := dep_add_cn cn !deps;
         A.var (id_of_const cn)
       | _ -> assert false
     in
@@ -169,10 +190,21 @@ end = struct
       | Constr.Var _ -> failwith "TODO: term_of_coq: Var"
       (* Toplevel definitions *)
       | Constr.Const (cn,_) ->
-        constants := cn :: !constants;
+        deps := dep_add_cn cn !deps;
         A.var (id_of_const cn)
-      | Constr.Ind _ -> failwith "TODO: term_of_coq: Ind"
-      | Constr.Construct _ -> failwith "TODO: term_of_coq: Construct"
+      | Constr.Ind ((m_inds,i_ind),_univ) ->
+        (* i-th inductive of [m_inds] *)
+        deps := dep_add_mind m_inds !deps;
+        Log.outputf Feedback.Debug
+          "term_of_coq: Ind (%s,%d)" (Names.MutInd.to_string m_inds) i_ind;
+        A.var (id_of_minds m_inds)
+      | Constr.Construct (((m_inds,i_ind),i_cstor), _univ) ->
+        (* i-th cstor of ind *)
+        deps := dep_add_mind m_inds !deps;
+        Log.outputf Feedback.Debug
+          "term_of_coq: Construct (%s,%d,%d)"
+          (Names.MutInd.to_string m_inds) i_ind i_cstor;
+        A.var (id_of_minds m_inds)
       (* Pattern Matching & fixed points *)
       | Constr.Case _ -> failwith "TODO: term_of_coq: Case"
       | Constr.Fix _ -> failwith "TODO: term_of_coq: Fix"
@@ -187,10 +219,10 @@ end = struct
         failwith "TODO: term_of_coq: Sort" (* should not occur in terms for now *)
     in
     let new_t = term_of_coq [] t in
-    new_t, !constants
+    new_t, !deps
 
   (* recover the statement defining/declaring [l] *)
-  let fetch_def_of_label env (c:Names.constant): Ast.statement * Names.constant list =
+  let fetch_def_of_label env (c:Names.constant): Ast.statement * deps =
     Log.outputf Feedback.Debug "fetch_def_of_label %s@."
       (Names.Constant.to_string c);
     let decl = Environ.lookup_constant c env in
@@ -200,55 +232,134 @@ end = struct
       | Declarations.RegularArity ty -> ty
       | Declarations.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
     in
-    let ty, new_consts = term_of_coq ty in
+    let ty, new_deps = term_of_coq env ty in
     (* convert definition (if any) *)
     let def = decl.Declarations.const_body in
-    let stmt, new_consts' = match def with
+    let stmt, new_deps' = match def with
       | Declarations.Undef _ ->
-        Ast.decl ~attrs:[] (id_of_const c) ty, []
+        Ast.decl ~attrs:[] (id_of_const c) ty, dep_empty
       | Declarations.Def def ->
-        let t, new_consts' =
+        let t, new_deps =
           Mod_subst.force_constr def
-          |> term_of_coq
+          |> term_of_coq env
         in
-        Ast.def (id_of_const c) t, new_consts'
+        (* TODO: if [t] is a type, use a copy instead, or just inline *)
+        Ast.def (id_of_const c) t, new_deps
       | Declarations.OpaqueDef _ -> 
-        Ast.axiom [Ast.true_], [] (* TODO *)
+        Ast.axiom [Ast.true_], dep_empty (* TODO *)
     in
-    stmt, List.rev_append new_consts new_consts'
+    stmt, dep_merge new_deps new_deps'
+
+  (* recover the statement defining/declaring [l] *)
+  let fetch_def_of_label env (c:Names.constant): Ast.statement * deps =
+    Log.outputf Feedback.Debug "fetch_def_of_label %s@."
+      (Names.Constant.to_string c);
+    let decl = Environ.lookup_constant c env in
+    (* convert type *)
+    let ty = match decl.Declarations.const_type with
+      | Declarations.RegularArity ty -> ty
+      | Declarations.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
+    in
+    let ty, new_deps = term_of_coq env ty in
+    (* convert definition (if any) *)
+    let def = decl.Declarations.const_body in
+    let stmt, new_deps' = match def with
+      | Declarations.Undef _ ->
+        Ast.decl ~attrs:[] (id_of_const c) ty, dep_empty
+      | Declarations.Def def ->
+        let t, new_deps =
+          Mod_subst.force_constr def
+          |> term_of_coq env
+        in
+        Ast.def (id_of_const c) t, new_deps
+      | Declarations.OpaqueDef _ -> 
+        Ast.axiom [Ast.true_], dep_empty (* TODO *)
+    in
+    stmt, dep_merge new_deps new_deps'
+
+
+  (* recover the statement defining the given mutual inductive type *)
+  let fetch_def_of_mind env (mind:Names.mutual_inductive): Ast.statement * deps =
+    Log.outputf Feedback.Debug "fetch_def_of_mind %s@."
+      (Names.MutInd.to_string mind);
+    let body = Environ.lookup_mind mind env in
+    let ind_l =
+      Array.to_list body.Declarations.mind_packets
+      |> List.map
+        (fun { Declarations.mind_typename; mind_consnames; _ } ->
+           Ast.true_
+           assert false)
+    in
+
+    (* convert type *)
+    let ty = match decl.Declarations.const_type with
+      | Declarations.RegularArity ty -> ty
+      | Declarations.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
+    in
+    let ty, new_deps = term_of_coq env ty in
+    (* convert definition (if any) *)
+    let def = decl.Declarations.const_body in
+    let stmt, new_deps' = match def with
+      | Declarations.Undef _ ->
+        Ast.decl ~attrs:[] (id_of_const c) ty, dep_empty
+      | Declarations.Def def ->
+        let t, new_deps =
+          Mod_subst.force_constr def
+          |> term_of_coq env
+        in
+        Ast.def (id_of_const c) t, new_deps
+      | Declarations.OpaqueDef _ -> 
+        Ast.axiom [Ast.true_], dep_empty (* TODO *)
+    in
+    stmt, dep_merge new_deps new_deps'
 
   (* main state for recursively gathering definitions + axioms *)
   type state = {
     env: Environ.env;
     (* global environment *)
-    mutable processed: Names.Cset.t;
+    mutable processed_consts: Names.Cset.t;
     (* set of already processed names *)
+    mutable processed_minds: Names.Mindset.t;
+    (* set of already processed inductive declarations *)
     mutable new_stmts: Ast.statement list;
     (* new statements, reversed *)
   }
 
   let create_state env =
     { env;
-      processed=Names.Cset.empty;
+      processed_consts=Names.Cset.empty;
+      processed_minds=Names.Mindset.empty;
       new_stmts=[];
     }
 
   (* recursively recover all dependencies from the given names *)
-  let gather_deps env (root_constants: Names.constant list): Ast.statement list =
+  let gather_deps env (deps:deps): Ast.statement list =
     let state = create_state env in
     (* recursive traversal, DFS, to enforce proper ordering of
        statements (i.e. definitions precede their use) *)
-    let rec explore (c:Names.constant): unit =
-      if not (Names.Cset.mem c state.processed) then (
-        state.processed <- Names.Cset.add c state.processed;
+    let rec expand (deps:deps): unit =
+      List.iter expand_const deps.dep_consts;
+      List.iter expand_mind deps.dep_minds;
+    and expand_const (c:Names.constant): unit =
+      if not (Names.Cset.mem c state.processed_consts) then (
+        state.processed_consts <- Names.Cset.add c state.processed_consts;
         let stmt, deps = fetch_def_of_label state.env c in
-        (* first, explore dependencies *)
-        List.iter explore deps;
+        (* expand sub-dependencies first *)
+        expand deps;
         (* then only we can push the new statement *)
         state.new_stmts <- stmt :: state.new_stmts;
       )
+    and expand_mind (mind:Names.mutual_inductive): unit =
+      if not (Names.Mindset.mem mind state.processed_minds) then (
+        state.processed_minds <- Names.Mindset.add mind state.processed_minds;
+        let stmt, deps = fetch_def_of_mind state.env mind in
+        (* expand sub-dependencies first *)
+        expand deps;
+        (* push new statment *)
+        state.new_stmts <- stmt :: state.new_stmts;
+      )
     in
-    List.iter explore root_constants;
+    expand deps;
     List.rev state.new_stmts
 
   let problem_of_goal (g:([`NF],_) PV.Goal.t) : Ast.problem =
@@ -274,18 +385,17 @@ end = struct
     in
     Log.outputf "@[<2>ctxmap: %a@]" pp_ctxmap ctxmap;
     *)
-    let concl, cs_list = term_of_coq concl in
+    let concl, cs_list = term_of_coq env concl in
     let cs_list, hyps =
       Util.List.fold_map
-        (fun cs_list t ->
-           let t', cs_list' = term_of_coq t in
-           cs_list' @ cs_list, t')
+        (fun deps t ->
+           let t', deps' = term_of_coq env t in
+           dep_merge deps' deps, t')
         cs_list hyps
     in
-    let goal =
-      match hyps with
-        | [] -> Ast.not_ concl
-        | hyps -> Ast.(not_ @@ imply (and_ hyps) concl)
+    let goal = match hyps with
+      | [] -> Ast.not_ concl
+      | hyps -> Ast.(not_ @@ imply (and_ hyps) concl)
     in
     (* pull dependencies (axioms and definitions) recursively *)
     let decls = gather_deps env cs_list in
