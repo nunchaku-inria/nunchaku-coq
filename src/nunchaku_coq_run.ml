@@ -323,7 +323,7 @@ end = struct
            let constructors =
              List.combine
                (Array.to_list ind.mind_consnames)
-               (Array.to_list ind.mind_user_lc)
+               (Array.to_list ind.mind_nf_lc)
            in
            constructors |> List.map (fun (id,ty) ->
                (* Remark: the name of the inductive is represented as
