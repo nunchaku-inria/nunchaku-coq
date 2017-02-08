@@ -24,6 +24,25 @@ Module simple_types.
 
 End simple_types.
 
+
+Module inductive.
+
+  Inductive mynat := Z | S : mynat -> mynat.
+
+  Goal Z = S Z.
+  Proof.
+    nunchaku warn.
+  Abort.
+
+  Inductive Tree := L | N : Tree -> Tree -> Tree.
+
+  Goal L = N L (N L L).
+  Proof.
+    nunchaku warn.
+  Abort.
+
+End inductive.
+
 Section sec1.
 
 Inductive mynat := Z | S : mynat -> mynat.
