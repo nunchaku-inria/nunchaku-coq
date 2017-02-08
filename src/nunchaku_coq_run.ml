@@ -336,14 +336,22 @@ end = struct
            let name = id_of_id ind.mind_typename in
 
            (* Generates a substitution corresponding to the
-              parameters. The choice of name is terrible, better name
-              at some point. TODO: take the opportunity to check that
-              there are no unsupported features in the parameters as
-              it would cause an incorrect type to be inferred: it's
-              probably better to fail in that case. *)
+              parameters. The choice of name is base on what has been
+              written by the used (defaults to 'a' if no name has been
+              given: it would probably be better to let Coq infer the
+              name in that case). The disambiguation is terribly
+              conservative, it is probably desirable to have generate
+              fresh name more lazily. TODO: take the opportunity to
+              check that there are no unsupported features in the
+              parameters as it would cause an incorrect type to be
+              inferred: it's probably better to fail in that case. *)
            let param_subst =
-             ind.mind_arity_ctxt
-             |> List.mapi (fun i _ -> Ast.Nun_id.of_string ("a"^string_of_int i))
+             let string_of_name = function
+               | Names.Name.Anonymous -> "a"
+               | Names.Name.Name id -> Names.Id.to_string id
+             in
+             List.rev ind.mind_arity_ctxt
+             |> List.mapi (fun i d -> Ast.Nun_id.of_string ((string_of_name (Context.Rel.Declaration.get_name d))^string_of_int i))
            in
 
            name ,
