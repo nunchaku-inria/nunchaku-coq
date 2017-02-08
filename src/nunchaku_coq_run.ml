@@ -152,6 +152,8 @@ end = struct
         deps := dep_add_cn cn !deps;
         A.var (id_of_const cn)
       | Constr.Rel n -> A.var @@ List.nth subst (n-1)
+      | Constr.App (x,args) ->
+        A.app (simple_type_of_coq subst x) Array.(map (simple_type_of_coq subst) args |> to_list)
       | _ -> assert false
     in
     let ty = simple_type_of_coq subst t in
@@ -310,6 +312,16 @@ end = struct
       | { Ast.term=Ast.TyArrow (l,r)} -> l :: (decomp_arrow_args r)
       | _ -> []
     in
+    (* The parameters of a constructor are represented as [Prod] in
+       the constructor arity. However, we get the list of parameter
+       externally, so can simply remove the leading [Prod]s given the
+       list of parameter. *)
+    let rec strip_params l a =
+      match l , Constr.kind a with
+      | _::l' , Constr.Prod (_,_,b) -> strip_params l' b
+      | [] , _ -> a
+      | _ , _ -> assert false
+    in
     let body = Environ.lookup_mind mind env in
     let ind_names =
       Array.to_list body.Declarations.mind_packets
@@ -323,8 +335,13 @@ end = struct
            (* Small repetition here for simplicity *)
            let name = id_of_id ind.mind_typename in
 
+           (* Generates a substitution corresponding to the parameters *)
+           let param_subst =
+             ind.mind_arity_ctxt |> List.map (fun _ -> Ast.Nun_id.of_string "a")
+           in
+
            name ,
-           [] ,
+           param_subst ,
            let constructors =
              List.combine
                (Array.to_list ind.mind_consnames)
@@ -334,7 +351,11 @@ end = struct
                (* Remark: the name of the inductives in the
                   mutually-inductive block are represented as
                   [Rel]s. *)
-               let (ty,deps') = simple_type_of_coq ind_names ty in
+               let (ty,deps') =
+                 ty
+                 |> strip_params param_subst
+                 |> simple_type_of_coq (param_subst@ind_names)
+               in
                let () = deps := dep_merge !deps deps' in
                (id_of_id id , decomp_arrow_args ty)
            )

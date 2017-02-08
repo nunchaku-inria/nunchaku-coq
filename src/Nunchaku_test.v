@@ -56,6 +56,13 @@ Module inductive.
     nunchaku warn.
   Abort.
 
+  Inductive List (A:Type) := nil | cons (a:A) (l:List A).
+
+  Goal nil _ = cons _ (S Z) (nil _).
+  Proof.
+    nunchaku warn.
+  Abort.
+
 End inductive.
 
 Section sec1.
