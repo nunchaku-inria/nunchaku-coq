@@ -311,11 +311,16 @@ end = struct
       | _ -> []
     in
     let body = Environ.lookup_mind mind env in
+    let ind_names =
+      Array.to_list body.Declarations.mind_packets
+      |> List.map (fun ind -> id_of_id ind.Declarations.mind_typename)
+    in
     let ind_l : Ast.mutual_types =
       Array.to_list body.Declarations.mind_packets
       |> List.map
         (fun ind ->
            let open Declarations in
+           (* Small repetition here for simplicity *)
            let name = id_of_id ind.mind_typename in
 
            name ,
@@ -326,9 +331,10 @@ end = struct
                (Array.to_list ind.mind_nf_lc)
            in
            constructors |> List.map (fun (id,ty) ->
-               (* Remark: the name of the inductive is represented as
-                  [Rel 1]. Todo: several inductive. *)
-               let (ty,deps') = simple_type_of_coq [name] ty in
+               (* Remark: the name of the inductives in the
+                  mutually-inductive block are represented as
+                  [Rel]s. *)
+               let (ty,deps') = simple_type_of_coq ind_names ty in
                let () = deps := dep_merge !deps deps' in
                (id_of_id id , decomp_arrow_args ty)
            )

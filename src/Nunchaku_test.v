@@ -41,6 +41,13 @@ Module inductive.
     nunchaku warn.
   Abort.
 
+  Inductive Even := EZ | ES : Odd -> Even
+  with Odd := OS : Even -> Odd.
+
+  Goal EZ = ES (OS EZ).
+  Proof.
+   nunchaku warn.
+
 End inductive.
 
 Section sec1.
