@@ -335,9 +335,15 @@ end = struct
            (* Small repetition here for simplicity *)
            let name = id_of_id ind.mind_typename in
 
-           (* Generates a substitution corresponding to the parameters *)
+           (* Generates a substitution corresponding to the
+              parameters. The choice of name is terrible, better name
+              at some point. TODO: take the opportunity to check that
+              there are no unsupported features in the parameters as
+              it would cause an incorrect type to be inferred: it's
+              probably better to fail in that case. *)
            let param_subst =
-             ind.mind_arity_ctxt |> List.map (fun _ -> Ast.Nun_id.of_string "a")
+             ind.mind_arity_ctxt
+             |> List.mapi (fun i _ -> Ast.Nun_id.of_string ("a"^string_of_int i))
            in
 
            name ,
@@ -354,7 +360,7 @@ end = struct
                let (ty,deps') =
                  ty
                  |> strip_params param_subst
-                 |> simple_type_of_coq (param_subst@ind_names)
+                 |> simple_type_of_coq (List.rev_append param_subst ind_names)
                in
                let () = deps := dep_merge !deps deps' in
                (id_of_id id , decomp_arrow_args ty)
