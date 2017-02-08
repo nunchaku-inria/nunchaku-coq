@@ -47,6 +47,14 @@ Module inductive.
   Goal EZ = ES (OS EZ).
   Proof.
    nunchaku warn.
+  Abort.
+
+  CoInductive CoNat := CZ | CS (n:CoNat).
+
+  Goal CZ = CS CZ.
+  Proof.
+    nunchaku warn.
+  Abort.
 
 End inductive.
 

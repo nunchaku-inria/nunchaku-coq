@@ -340,7 +340,12 @@ end = struct
            )
         )
     in
-    Ast.data ind_l , !deps
+    let mk =
+      match body.Declarations.mind_finite with
+      | Decl_kinds.CoFinite -> Ast.codata
+      | _ -> Ast.data
+    in
+    mk ind_l , !deps
 
   (* main state for recursively gathering definitions + axioms *)
   type state = {
