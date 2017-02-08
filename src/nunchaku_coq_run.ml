@@ -108,6 +108,9 @@ end = struct
   let id_of_const (cn:Names.constant): Ast.Nun_id.t =
     Names.(cn |> Constant.user |> KerName.to_string |> Ast.Nun_id.of_string)
 
+  let id_of_id (id:Names.Id.t) : Ast.Nun_id.t =
+    id |> Names.Id.to_string |> Ast.Nun_id.of_string
+
   let id_of_minds (m:Names.MutInd.t): Ast.Nun_id.t =
     Names.MutInd.to_string m |> Ast.Nun_id.of_string
 
@@ -129,6 +132,33 @@ end = struct
     dep_minds=a.dep_minds@b.dep_minds;
   }
 
+  (* Convert [t] into a simple type in Nunchaku syntax, and return the
+     list of constant occurring in [ty]. *)
+  let simple_type_of_coq (subst:Ast.id list) (t:coq_term) : Ast.ty * deps=
+    let module A = Ast in
+    let deps : deps ref = ref dep_empty in
+    let rec simple_type_of_coq subst t =
+      match Constr.kind t with
+      | Constr.Sort (Sorts.Prop _) -> A.ty_prop
+      | Constr.Sort (Sorts.Type _) -> A.ty_type
+      | Constr.Prod (_,a,b) when not (Termops.dependent (Constr.mkRel 1) b) ->
+        (* A dummy value is inserted as a way to shift the
+           substitution, as [b] is technically in the scope a new
+           variable (even though it doesn't depend on it).*)
+        let dummy = A.Nun_id.of_string "dummy" in
+        A.ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq (dummy::subst) b)
+      | Constr.Prod _ -> failwith "simple_type_of_coq: dependent type"
+      | Constr.Const (cn,_) ->
+        deps := dep_add_cn cn !deps;
+        A.var (id_of_const cn)
+      | Constr.Rel n -> A.var @@ List.nth subst (n-1)
+      | Constr.App (x,args) ->
+        A.app (simple_type_of_coq subst x) Array.(map (simple_type_of_coq subst) args |> to_list)
+      | _ -> assert false
+    in
+    let ty = simple_type_of_coq subst t in
+    ty , !deps
+
   (* convert [t] into a Nunchaku term, and return the list of constants
      occurring in [t] *)
   let term_of_coq (env:Environ.env) (t:coq_term) : Ast.term * deps =
@@ -141,17 +171,6 @@ end = struct
       let x = Ast.Nun_id.of_coq_name x in
       let fresh = Ast.Nun_id.fresh x (Ast.Nun_id.Set.of_list subst) in
       fresh::subst
-    in
-    let rec simple_type_of_coq (subst:Ast.id list) (t:coq_term) : Ast.ty =
-      match Constr.kind t with
-      | Constr.Sort (Sorts.Prop _) -> A.ty_prop
-      | Constr.Sort (Sorts.Type _) -> A.ty_type
-      | Constr.Prod (_,a,b) when not (Termops.dependent (Constr.mkRel 1) b) ->
-        A.ty_arrow (simple_type_of_coq subst a) (simple_type_of_coq subst b)
-      | Constr.Const (cn,_) ->
-        deps := dep_add_cn cn !deps;
-        A.var (id_of_const cn)
-      | _ -> assert false
     in
     let rec term_of_coq (subst:Ast.id list) (t:coq_term) : Ast.term =
       match Constr.kind t with
@@ -179,7 +198,9 @@ end = struct
       | Constr.Lambda (x,t,u) ->
         let subst = push_fresh x subst in
         let x = List.hd subst in
-        A.fun_ (x, simple_type_of_coq subst t) (term_of_coq subst u)
+        let (ty,deps') = simple_type_of_coq subst t in
+        let () = deps := deps' in
+        A.fun_ (x, ty) (term_of_coq subst u)
       | Constr.App (x, args) ->
         A.app (term_of_coq subst x) Array.(map (term_of_coq subst) args |> to_list)
       | Constr.Rel n -> A.var @@ List.nth subst (n-1)
@@ -204,7 +225,11 @@ end = struct
         Log.outputf Feedback.Debug
           "term_of_coq: Construct (%s,%d,%d)"
           (Names.MutInd.to_string m_inds) i_ind i_cstor;
-        A.var (id_of_minds m_inds)
+        let mind = Environ.lookup_mind m_inds env in
+        (* /!\ inductives are numbered from 0 while their constructors are
+           numbered from 1. *)
+        let ind = mind.Declarations.mind_packets.(i_ind) in
+        A.var (id_of_id (ind.Declarations.mind_consnames.(i_cstor-1)))
       (* Pattern Matching & fixed points *)
       | Constr.Case _ -> failwith "TODO: term_of_coq: Case"
       | Constr.Fix _ -> failwith "TODO: term_of_coq: Fix"
@@ -282,36 +307,80 @@ end = struct
   let fetch_def_of_mind env (mind:Names.mutual_inductive): Ast.statement * deps =
     Log.outputf Feedback.Debug "fetch_def_of_mind %s@."
       (Names.MutInd.to_string mind);
+    let deps : deps ref = ref dep_empty in
+    let rec decomp_arrow_args = function
+      | { Ast.term=Ast.TyArrow (l,r)} -> l :: (decomp_arrow_args r)
+      | _ -> []
+    in
+    (* The parameters of a constructor are represented as [Prod] in
+       the constructor arity. However, we get the list of parameter
+       externally, so can simply remove the leading [Prod]s given the
+       list of parameter. *)
+    let rec strip_params l a =
+      match l , Constr.kind a with
+      | _::l' , Constr.Prod (_,_,b) -> strip_params l' b
+      | [] , _ -> a
+      | _ , _ -> assert false
+    in
     let body = Environ.lookup_mind mind env in
-    let ind_l =
+    let ind_names =
+      Array.to_list body.Declarations.mind_packets
+      |> List.map (fun ind -> id_of_id ind.Declarations.mind_typename)
+    in
+    let ind_l : Ast.mutual_types =
       Array.to_list body.Declarations.mind_packets
       |> List.map
-        (fun { Declarations.mind_typename; mind_consnames; _ } ->
-           Ast.true_
-           assert false)
-    in
+        (fun ind ->
+           let open Declarations in
+           (* Small repetition here for simplicity *)
+           let name = id_of_id ind.mind_typename in
 
-    (* convert type *)
-    let ty = match decl.Declarations.const_type with
-      | Declarations.RegularArity ty -> ty
-      | Declarations.TemplateArity _ -> failwith "TODO: stmt_of_decl: TemplateArity"
+           (* Generates a substitution corresponding to the
+              parameters. The choice of name is base on what has been
+              written by the used (defaults to 'a' if no name has been
+              given: it would probably be better to let Coq infer the
+              name in that case). The disambiguation is terribly
+              conservative, it is probably desirable to have generate
+              fresh name more lazily. TODO: take the opportunity to
+              check that there are no unsupported features in the
+              parameters as it would cause an incorrect type to be
+              inferred: it's probably better to fail in that case. *)
+           let param_subst =
+             let string_of_name = function
+               | Names.Name.Anonymous -> "a"
+               | Names.Name.Name id -> Names.Id.to_string id
+             in
+             List.rev ind.mind_arity_ctxt
+             |> List.mapi (fun i d -> Ast.Nun_id.of_string ((string_of_name (Context.Rel.Declaration.get_name d))^string_of_int i))
+           in
+
+           name ,
+           param_subst ,
+           let constructors =
+             List.combine
+               (Array.to_list ind.mind_consnames)
+               (Array.to_list ind.mind_nf_lc)
+           in
+           constructors |> List.map (fun (id,ty) ->
+               (* Remark: the name of the inductives in the
+                  mutually-inductive block are represented as
+                  [Rel]s. *)
+               let (ty,deps') =
+                 ty
+                 |> strip_params param_subst
+                 |> simple_type_of_coq (List.rev_append param_subst ind_names)
+               in
+               let () = deps := dep_merge !deps deps' in
+               (id_of_id id , decomp_arrow_args ty)
+           )
+        )
     in
-    let ty, new_deps = term_of_coq env ty in
-    (* convert definition (if any) *)
-    let def = decl.Declarations.const_body in
-    let stmt, new_deps' = match def with
-      | Declarations.Undef _ ->
-        Ast.decl ~attrs:[] (id_of_const c) ty, dep_empty
-      | Declarations.Def def ->
-        let t, new_deps =
-          Mod_subst.force_constr def
-          |> term_of_coq env
-        in
-        Ast.def (id_of_const c) t, new_deps
-      | Declarations.OpaqueDef _ -> 
-        Ast.axiom [Ast.true_], dep_empty (* TODO *)
+    let mk =
+      match body.Declarations.mind_finite with
+      | Decl_kinds.CoFinite -> Ast.codata
+      | _ -> Ast.data
     in
-    stmt, dep_merge new_deps new_deps'
+    mk ind_l , !deps
 
   (* main state for recursively gathering definitions + axioms *)
   type state = {

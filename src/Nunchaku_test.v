@@ -24,6 +24,47 @@ Module simple_types.
 
 End simple_types.
 
+
+Module inductive.
+
+  Inductive mynat := Z | S : mynat -> mynat.
+
+  Goal Z = S Z.
+  Proof.
+    nunchaku warn.
+  Abort.
+
+  Inductive Tree := L | N : Tree -> Tree -> Tree.
+
+  Goal L = N L (N L L).
+  Proof.
+    nunchaku warn.
+  Abort.
+
+  Inductive Even := EZ | ES : Odd -> Even
+  with Odd := OS : Even -> Odd.
+
+  Goal EZ = ES (OS EZ).
+  Proof.
+   nunchaku warn.
+  Abort.
+
+  CoInductive CoNat := CZ | CS (n:CoNat).
+
+  Goal CZ = CS CZ.
+  Proof.
+    nunchaku warn.
+  Abort.
+
+  Inductive List (A:Type) := nil | cons (a:A) (l:List A).
+
+  Goal nil _ = cons _ (S Z) (nil _).
+  Proof.
+    nunchaku warn.
+  Abort.
+
+End inductive.
+
 Section sec1.
 
 Inductive mynat := Z | S : mynat -> mynat.
