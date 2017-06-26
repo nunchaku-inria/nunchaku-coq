@@ -401,7 +401,7 @@ let pp_statement out st = match st.stmt_value with
   | Spec l -> fpf out "@[spec %a.@]" pp_spec_defs l
   | Rec l -> fpf out "@[rec %a.@]" pp_rec_defs l
   | Def (a,b) ->
-      fpf out "@[<2>axiom[def]@ %a@ = @[%a@].@]" pp_id a pp_term b
+      fpf out "@[<2>axiom@ %a@ = @[%a@].@]" pp_id a pp_term b
   | Data l -> fpf out "@[data %a.@]" pp_ty_defs l
   | Codata l -> fpf out "@[codata %a.@]" pp_ty_defs l
   | Goal t -> fpf out "@[goal %a.@]" pp_term t
